@@ -224,6 +224,7 @@ void syntax_select_for_filename(editor_ctx_t *ctx, char *filename) {
     for (unsigned int j = 0; j < HLDB_ENTRIES; j++) {
         struct t_editor_syntax *s = HLDB+j;
         unsigned int i = 0;
+        if (s->filematch == NULL) continue;  /* Skip terminator entry */
         while(s->filematch[i]) {
             char *p;
             int patlen = strlen(s->filematch[i]);
