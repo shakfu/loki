@@ -18,8 +18,6 @@ void editor_cli_print_usage(void) {
     printf("\nOptions:\n");
     printf("  -h, --help          Show this help message\n");
     printf("  -v, --version       Show version information\n");
-    printf("  -sf PATH            Use built-in synth with soundfont (.sf2)\n");
-    printf("  -cs PATH            Use Csound synthesis with .csd file\n");
     printf("  --line-numbers      Show line numbers\n");
     printf("  --word-wrap         Enable word wrap\n");
     printf("  --json-rpc          Run in JSON-RPC mode (stdin/stdout)\n");
@@ -32,17 +30,13 @@ void editor_cli_print_usage(void) {
     printf("  --web-port N        Web server port (default: 8080)\n");
     printf("  --web-root PATH     Directory containing web UI files\n");
 #endif
-    printf("\nInteractive mode (default):\n");
-    printf("  " LOKI_NAME " <file.alda>           Open file in editor\n");
-    printf("  " LOKI_NAME " -sf gm.sf2 song.alda  Open with TinySoundFont synth\n");
-    printf("  " LOKI_NAME " -cs inst.csd song.alda Open with Csound synthesis\n");
+    printf("\nExamples:\n");
+    printf("  " LOKI_NAME " file.txt              Open file in editor\n");
+    printf("  " LOKI_NAME " --json-rpc            Run in JSON-RPC mode\n");
 #ifdef LOKI_WEB_HOST
-    printf("  " LOKI_NAME " --web song.alda       Open in browser at localhost:8080\n");
+    printf("  " LOKI_NAME " --web file.txt        Open in browser at localhost:8080\n");
 #endif
     printf("\nKeybindings:\n");
-    printf("  Ctrl-E    Play current part or selection\n");
-    printf("  Ctrl-P    Play entire file\n");
-    printf("  Ctrl-G    Stop playback\n");
     printf("  Ctrl-S    Save file\n");
     printf("  Ctrl-Q    Quit\n");
     printf("  Ctrl-F    Find\n");
@@ -68,26 +62,6 @@ int editor_cli_parse(int argc, char **argv, EditorCliArgs *args) {
         if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
             args->show_version = 1;
             return 0;
-        }
-
-        /* Soundfont option */
-        if (strcmp(arg, "-sf") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Error: -sf requires a path argument\n");
-                return -1;
-            }
-            args->soundfont_path = argv[++i];
-            continue;
-        }
-
-        /* Csound option */
-        if (strcmp(arg, "-cs") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Error: -cs requires a path argument\n");
-                return -1;
-            }
-            args->csound_path = argv[++i];
-            continue;
         }
 
         /* Line numbers option */

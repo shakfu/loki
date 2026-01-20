@@ -253,16 +253,9 @@ static void print_usage(void) {
     printf("\nOptions:\n");
     printf("  -h, --help          Show this help message\n");
     printf("  -v, --version       Show version information\n");
-    printf("  -sf PATH            Use built-in synth with soundfont (.sf2)\n");
-    printf("  -cs PATH            Use Csound synthesis with .csd file\n");
-    printf("\nInteractive mode (default):\n");
-    printf("  " LOKI_NAME " <file>           Open file in editor\n");
-    printf("  " LOKI_NAME " -sf gm.sf2 song.txt  Open file with TinySoundFont (not available)\n");
-    printf("  " LOKI_NAME " -cs inst.csd song.txt Open file with Csound (not available)\n");
+    printf("\nExamples:\n");
+    printf("  " LOKI_NAME " file.txt         Open file in editor\n");
     printf("\nKeybindings:\n");
-    printf("  Ctrl-E    Play current part or selection\n");
-    printf("  Ctrl-P    Play entire file\n");
-    printf("  Ctrl-G    Stop playback\n");
     printf("  Ctrl-S    Save file\n");
     printf("  Ctrl-Q    Quit\n");
     printf("  Ctrl-F    Find\n");
@@ -289,8 +282,6 @@ int loki_editor_main(int argc, char **argv) {
 
     /* Parse command-line arguments */
     const char *filename = NULL;
-    const char *soundfont_path = NULL;
-    const char *csound_path = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -300,14 +291,6 @@ int loki_editor_main(int argc, char **argv) {
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
             printf(LOKI_NAME " %s\n", LOKI_VERSION);
             exit(0);
-        }
-        if (strcmp(argv[i], "-sf") == 0 && i + 1 < argc) {
-            soundfont_path = argv[++i];
-            continue;
-        }
-        if (strcmp(argv[i], "-cs") == 0 && i + 1 < argc) {
-            csound_path = argv[++i];
-            continue;
         }
         if (argv[i][0] == '-') {
             fprintf(stderr, "Error: Unknown option: %s\n", argv[i]);
@@ -406,27 +389,7 @@ int loki_editor_main(int argc, char **argv) {
             if (ret == 0) {
                 const LokiLangOps *lang = loki_lang_for_file(ctx->model.filename);
                 if (lang) {
-                    /* Configure audio backend if requested via CLI */
-                    int backend_ret = loki_lang_configure_backend(ctx, soundfont_path, csound_path);
-                    if (backend_ret == 0) {
-                        /* Backend configured successfully */
-                        if (csound_path) {
-                            editor_set_status_msg(ctx, "%s: Using Csound (%s)", lang->name, csound_path);
-                        } else if (soundfont_path) {
-                            editor_set_status_msg(ctx, "%s: Using TinySoundFont (%s)", lang->name, soundfont_path);
-                        }
-                    } else if (backend_ret == -1) {
-                        /* Backend requested but failed */
-                        const char *err = loki_lang_get_error(ctx);
-                        if (csound_path) {
-                            editor_set_status_msg(ctx, "Failed to load CSD: %s", err ? err : csound_path);
-                        } else if (soundfont_path) {
-                            editor_set_status_msg(ctx, "Failed to load soundfont: %s", err ? err : soundfont_path);
-                        }
-                    } else {
-                        /* No backend requested - show default message */
-                        editor_set_status_msg(ctx, "%s: Ctrl-E eval, Ctrl-G stop", lang->name);
-                    }
+                    editor_set_status_msg(ctx, "%s mode", lang->name);
                 }
             } else if (ret == -1) {
                 const char *err = loki_lang_get_error(ctx);

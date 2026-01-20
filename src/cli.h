@@ -20,8 +20,6 @@ extern "C" {
  */
 typedef struct {
     const char *filename;       /* File to open (NULL if none) */
-    const char *soundfont_path; /* Path to soundfont for TinySoundFont (-sf) */
-    const char *csound_path;    /* Path to CSD file for Csound (-cs) */
     const char *web_root;       /* Web UI directory for web mode (--web-root) */
     int show_help;              /* User requested help (-h, --help) */
     int show_version;           /* User requested version (-v, --version) */
