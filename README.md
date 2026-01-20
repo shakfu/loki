@@ -28,50 +28,34 @@ A lightweight, modular text editor built on antirez's [kilo](https://github.com/
 - **libcurl-powered**: Reliable, battle-tested HTTP client
 
 ### Smart Configuration
-- **Auto-detection**: Finds Homebrew Lua/LuaJIT and libcurl automatically
 - **Local override**: Project-specific `.loki/` config takes precedence
 - **Zero-config**: Works out of the box with sensible defaults
 - **Example configs**: Complete AI integration examples included
 
 ## Architecture
 
-Loki uses a **modular architecture** with a minimal core and feature modules:
+Loki uses a **modular architecture** with session-based design and feature modules:
 
 ```
 src/
-├── loki_core.c          (1,336 lines) - Minimal editor core
-│   ├── Terminal I/O and raw mode
-│   ├── Buffer and row management
-│   ├── Syntax highlighting infrastructure
-│   ├── Screen rendering (VT100 sequences)
-│   ├── File I/O operations
-│   ├── Cursor movement primitives
-│   └── Basic editing operations
-│
-├── loki_languages.c     (494 lines) - Language support
-│   ├── Built-in language definitions (C, Python, Lua, Markdown)
-│   ├── Dynamic language registration via Lua
-│   └── Syntax highlighting rules
-│
-├── loki_modal.c         (407 lines) - Modal editing
-│   ├── NORMAL mode (navigation, commands)
-│   ├── INSERT mode (text insertion)
-│   ├── VISUAL mode (text selection)
-│   └── Vim-like keybindings (h/j/k/l, i/a/o/v)
-│
-├── loki_selection.c     (156 lines) - Selection & clipboard
-│   ├── Selection tracking and highlighting
-│   ├── OSC 52 clipboard protocol (SSH-compatible)
-│   └── Base64 encoding for terminal clipboard
-│
-├── loki_search.c        (128 lines) - Search functionality
-│   ├── Incremental search with live preview
-│   ├── Forward/backward navigation
-│   └── Match highlighting
-│
-├── loki_editor.c        - Main editor loop & Lua integration
-├── loki_lua.c           - Lua C API bindings
-└── main_editor.c        - Entry point
+├── core.c               - Core editor operations (buffers, rows, file I/O)
+├── terminal.c           - Terminal I/O and raw mode handling
+├── renderer.c           - Screen rendering (VT100 sequences)
+├── buffers.c            - Multi-buffer management
+├── modal.c              - Vim-like modal editing (NORMAL/INSERT/VISUAL)
+├── selection.c          - Selection tracking and OSC 52 clipboard
+├── search.c             - Incremental search with highlighting
+├── syntax.c             - Syntax highlighting infrastructure
+├── languages.c          - Language definitions (C, Python, Lua, etc.)
+├── command.c            - Ex-style command mode (:w, :q, etc.)
+├── undo.c               - Undo/redo with operation grouping
+├── indent.c             - Smart auto-indentation
+├── http.c               - Async HTTP with security hardening
+├── lua.c                - Lua C API bindings
+├── session.c            - Session management (opaque EditorSession handles)
+├── editor.c             - Main editor loop
+├── repl.c               - Standalone Lua REPL
+└── main.c               - Entry point
 ```
 
 **Benefits:**
@@ -85,26 +69,25 @@ src/
 ### Install Dependencies (macOS)
 
 ```bash
-brew install lua curl  # or: brew install luajit curl
-# Optional: brew install readline  # enables enhanced CLI history/highlighting
+brew install lua curl libuv  # or: luajit instead of lua
+# Optional: brew install readline  # enables enhanced CLI history/completion
 ```
+
+cmark (CommonMark parser) is vendored in `thirdparty/` and built automatically.
 
 ### Compile
 
 ```bash
-# Build the editor (build/loki-editor)
-make editor
+# Configure and build
+mkdir -p build && cd build
+cmake ..
+make
 
-# Build the REPL (build/loki-repl)
-make repl
-
-# Build everything (library + both binaries)
-make all
+# Run tests
+make test
 ```
 
-The Makefile is a thin wrapper over CMake and drops artifacts under `build/`. Use `make lib` if you only need `libloki`.
-
-Prefer direct CMake invocations? Run `cmake -S . -B build` once, then `cmake --build build --target <target>`. Available targets match the Makefile aliases (`libloki`, `loki-editor`, `loki-repl`, `show-config`).
+The build produces `build/loki` (main executable) and `build/libloki.a` (static library).
 
 Requires: C99 compiler, POSIX system (Linux, macOS, BSD)
 
@@ -113,7 +96,7 @@ Requires: C99 compiler, POSIX system (Linux, macOS, BSD)
 ### Interactive Mode
 
 ```bash
-./build/loki-editor <filename>
+./build/loki <filename>
 ```
 
 Opens the file in the interactive editor.
@@ -122,13 +105,13 @@ Opens the file in the interactive editor.
 
 ```bash
 # Run AI completion on a file and save the result
-./build/loki-editor --complete <filename>
+./build/loki --complete <filename>
 
 # Run AI explanation on a file and print to stdout
-./build/loki-editor --explain <filename>
+./build/loki --explain <filename>
 
 # Show help
-./build/loki-editor --help
+./build/loki --help
 ```
 
 **Requirements for AI commands:**
@@ -138,12 +121,12 @@ Opens the file in the interactive editor.
 ### Standalone REPL
 
 ```bash
-./build/loki-repl            # Interactive shell
-./build/loki-repl script.lua # Execute a Lua script and exit
+./build/loki --repl            # Interactive shell
+./build/loki --repl script.lua # Execute a Lua script and exit
 ```
 
 - Shares the same Lua bootstrap/config loader as the editor.
-- Use `--trace-http` to mirror `KILO_DEBUG` logging for async HTTP calls.
+- Use `--trace-http` to mirror `LOKI_DEBUG` logging for async HTTP calls.
 - Command history is persisted to `.loki/repl_history` when available.
 - Type `help` (or `:help`) to list built-in commands.
 - Uses GNU Readline/libedit when available (history, emacs keybindings, inline syntax colour); falls back to a minimal line editor otherwise.
@@ -323,26 +306,24 @@ Style strings map to constants exposed under `loki.hl` (`match`, `string`,
 ## Project Status
 
 This is a fork with enhancements:
-- [x] **Modular architecture** - Minimal core (1.3K lines) + feature modules (1.2K lines)
+- [x] **Modular architecture** - Session-based design with dedicated feature modules
 - [x] **Modal editing** - Vim-like NORMAL/INSERT/VISUAL modes with h/j/k/l navigation
 - [x] **All critical bugs fixed** - Buffer overflows, NULL checks, signal safety
-- [x] **Lua/LuaJIT scripting** - Via Homebrew, dynamically linked
-- [x] **Async HTTP support** - Non-blocking, libcurl-based
+- [x] **Lua scripting** - Lua or LuaJIT support
+- [x] **Async HTTP support** - Non-blocking, libcurl-based with security hardening
 - [x] **AI integration examples** - OpenAI, compatible APIs
 - [x] **Project-local configuration** - `.loki/` override
 - [x] **Binary file protection** - Detects and refuses to open binary files
 - [x] **Improved error handling** - Comprehensive error checking throughout
+- [x] **Multi-buffer support** - Edit multiple files with tab-based navigation
+- [x] **Undo/Redo** - Full undo history with operation grouping
+- [x] **Auto-indentation** - Smart indent with bracket matching
 
-**Architecture:**
-- Core: 1,336 lines (terminal I/O, buffers, rendering, syntax infrastructure)
-- Features: 1,185 lines across 4 modules (languages, modal, selection, search)
-- Total: ~2.5K lines of clean, modular C99 code
-
-**Dependencies (via Homebrew):**
+**Dependencies:**
 - Lua or LuaJIT
 - libcurl
-
-**Binary size:** ~72KB (dynamically linked)
+- libuv
+- cmark (vendored)
 
 
 ## Credits

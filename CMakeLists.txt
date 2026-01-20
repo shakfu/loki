@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(loki C)
+project(loki VERSION 0.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -10,10 +10,17 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(LOKI_BUILD_SHARED "Build libloki as a shared library" OFF)
+option(BUILD_TESTS "Build unit tests" ON)
 
+# Find required packages
+find_package(PkgConfig REQUIRED)
 find_package(Lua REQUIRED)
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
+
+# Find libuv for async support
+pkg_check_modules(LIBUV REQUIRED libuv)
+
 # Line editing library detection (editline preferred over readline due to BSD license)
 set(LINEEDIT_FOUND FALSE)
 set(LINEEDIT_LIBRARY "")
@@ -88,32 +95,56 @@ if (LOKI_BUILD_SHARED)
     set(LOKI_LIBRARY_TYPE SHARED)
 endif()
 
-add_library(libloki ${LOKI_LIBRARY_TYPE}
-    src/loki_core.c
-    src/loki_lua.c
-    src/loki_editor.c
-    src/loki_syntax.c
-    src/loki_indent.c
-    src/loki_languages.c
-    src/loki_selection.c
-    src/loki_search.c
-    src/loki_modal.c
-    src/loki_command.c
-    src/loki_terminal.c
-    src/loki_undo.c
-    src/loki_buffers.c
+# Loki core library - new modular architecture
+set(LOKI_SOURCES
+    src/core.c
+    src/buffers.c
+    src/terminal.c
+    src/renderer.c
+    src/event.c
+    src/modal.c
+    src/selection.c
+    src/syntax.c
+    src/languages.c
+    src/search.c
+    src/undo.c
+    src/indent.c
+    src/json.c
+    src/serialize.c
+    src/async_queue.c
+    src/command.c
+    src/command/basic.c
+    src/command/file.c
+    src/command/goto.c
+    src/command/substitute.c
+    src/editor.c
+    src/lua.c
+    src/lang_bridge.c
+    src/session.c
+    src/host.c
+    src/cli.c
+    src/jsonrpc.c
+    src/repl_helpers.c
+    src/repl.c
     src/loki_markdown.c
+    src/http.c
 )
+
+add_library(libloki ${LOKI_LIBRARY_TYPE} ${LOKI_SOURCES})
 
 target_include_directories(libloki
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${LUA_INCLUDE_DIR}
         ${CURL_INCLUDE_DIRS}
+        ${LIBUV_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/cmark/src
 )
 
 target_compile_options(libloki PRIVATE -Wall -Wextra -pedantic)
+
+target_link_directories(libloki PUBLIC ${LIBUV_LIBRARY_DIRS})
 
 target_link_libraries(libloki
     PUBLIC
@@ -121,6 +152,7 @@ target_link_libraries(libloki
         CURL::libcurl
         Threads::Threads
         ${CMAKE_DL_LIBS}
+        ${LIBUV_LIBRARIES}
         cmark
 )
 
@@ -128,29 +160,20 @@ if (NOT MSVC)
     target_link_libraries(libloki PUBLIC m)
 endif()
 
-add_executable(loki_editor src/main_editor.c)
-target_compile_options(loki_editor PRIVATE -Wall -Wextra -pedantic)
-target_link_libraries(loki_editor PRIVATE libloki)
-set_target_properties(loki_editor PROPERTIES OUTPUT_NAME "loki-editor")
-
-add_executable(loki_repl src/main_repl.c)
-target_include_directories(loki_repl PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-target_compile_options(loki_repl PRIVATE -Wall -Wextra -pedantic)
-target_link_libraries(loki_repl PRIVATE libloki)
-set_target_properties(loki_repl PROPERTIES OUTPUT_NAME "loki-repl")
+# Main executable
+add_executable(loki src/main.c)
+target_compile_options(loki PRIVATE -Wall -Wextra -pedantic)
+target_link_libraries(loki PRIVATE libloki)
 
 if (LINEEDIT_FOUND)
-    target_include_directories(loki_repl PRIVATE ${LINEEDIT_INCLUDE_DIR})
-    target_link_libraries(loki_repl PRIVATE ${LINEEDIT_LIBRARY})
+    target_include_directories(loki PRIVATE ${LINEEDIT_INCLUDE_DIR})
+    target_link_libraries(loki PRIVATE ${LINEEDIT_LIBRARY})
     if (LINEEDIT_TYPE STREQUAL "editline")
-        target_compile_definitions(loki_repl PRIVATE LOKI_HAVE_EDITLINE=1)
+        target_compile_definitions(loki PRIVATE LOKI_HAVE_EDITLINE=1)
     else()
-        target_compile_definitions(loki_repl PRIVATE LOKI_HAVE_READLINE=1)
+        target_compile_definitions(loki PRIVATE LOKI_HAVE_READLINE=1)
     endif()
-    message(STATUS "loki-repl will use ${LINEEDIT_TYPE} for line editing (history, completion)")
+    message(STATUS "loki will use ${LINEEDIT_TYPE} for line editing (history, completion)")
 endif()
 
 add_custom_target(show-config
@@ -158,125 +181,80 @@ add_custom_target(show-config
     COMMAND ${CMAKE_COMMAND} -E echo "Lua libraries: ${LUA_LIBRARIES}"
     COMMAND ${CMAKE_COMMAND} -E echo "libcurl include: ${CURL_INCLUDE_DIRS}"
     COMMAND ${CMAKE_COMMAND} -E echo "libcurl libraries: ${CURL_LIBRARIES}"
+    COMMAND ${CMAKE_COMMAND} -E echo "libuv include: ${LIBUV_INCLUDE_DIRS}"
+    COMMAND ${CMAKE_COMMAND} -E echo "libuv libraries: ${LIBUV_LIBRARIES}"
     COMMAND ${CMAKE_COMMAND} -E echo "Line editing: ${LINEEDIT_TYPE}"
     COMMAND ${CMAKE_COMMAND} -E echo "Line edit library: ${LINEEDIT_LIBRARY}"
 )
 
-enable_testing()
-add_test(NAME loki_editor_version COMMAND $<TARGET_FILE:loki_editor> --version)
-add_test(NAME loki_repl_version COMMAND $<TARGET_FILE:loki_repl> --version)
+# Tests
+if(BUILD_TESTS)
+    enable_testing()
 
-# Test framework library
-add_library(test_framework STATIC tests/test_framework.c)
-target_include_directories(test_framework PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+    add_test(NAME loki_version COMMAND $<TARGET_FILE:loki> --version)
 
-# Unit tests for core functionality
-add_executable(test_core tests/test_core.c)
-target_include_directories(test_core PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-)
-target_link_libraries(test_core PRIVATE libloki test_framework)
-add_test(NAME test_core COMMAND test_core)
+    # Test framework library
+    add_library(test_framework STATIC tests/test_framework.c)
+    target_include_directories(test_framework PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
 
-# Integration tests for file I/O
-add_executable(test_file_io tests/test_file_io.c)
-target_include_directories(test_file_io PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-)
-target_link_libraries(test_file_io PRIVATE libloki test_framework)
-add_test(NAME test_file_io COMMAND test_file_io)
+    # Core editor tests (new modular structure)
+    set(LOKI_TESTS
+        test_core
+        test_buffers
+        test_modal
+        test_terminal
+        test_syntax
+        test_search
+        test_selection
+        test_undo
+        test_indent
+        test_command
+        test_serialize
+        test_lua_api
+        test_lang_registration
+        test_file_io
+        test_row_operations
+        test_async_queue
+    )
 
-# Integration tests for Lua API
-add_executable(test_lua_api tests/test_lua_api.c)
-target_include_directories(test_lua_api PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_lua_api PRIVATE libloki test_framework)
-add_test(NAME test_lua_api COMMAND test_lua_api)
+    foreach(test_name ${LOKI_TESTS})
+        add_executable(${test_name} tests/loki/${test_name}.c)
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+            ${LUA_INCLUDE_DIR}
+        )
+        target_link_libraries(${test_name} PRIVATE libloki test_framework)
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endforeach()
 
-# Unit tests for language registration helpers
-add_executable(test_lang_registration tests/test_lang_registration.c)
-target_include_directories(test_lang_registration PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_lang_registration PRIVATE libloki test_framework)
-add_test(NAME test_lang_registration COMMAND test_lang_registration)
+    # HTTP tests
+    add_executable(test_http_security tests/test_http_security.c)
+    target_include_directories(test_http_security PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${LUA_INCLUDE_DIR}
+    )
+    target_link_libraries(test_http_security PRIVATE libloki test_framework)
+    add_test(NAME test_http_security COMMAND test_http_security)
 
-# Unit tests for HTTP security features
-add_executable(test_http_security tests/test_http_security.c)
-target_include_directories(test_http_security PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_http_security PRIVATE libloki test_framework)
-add_test(NAME test_http_security COMMAND test_http_security)
+    add_executable(test_http_simple tests/test_http_simple.c)
+    target_include_directories(test_http_simple PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${LUA_INCLUDE_DIR}
+    )
+    target_link_libraries(test_http_simple PRIVATE libloki test_framework)
+    add_test(NAME test_http_simple COMMAND test_http_simple)
+endif()
 
-# Unit tests for modal editing (vim-like modes)
-add_executable(test_modal tests/test_modal.c)
-target_include_directories(test_modal PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_modal PRIVATE libloki test_framework)
-add_test(NAME test_modal COMMAND test_modal)
-
-# Unit tests for syntax highlighting
-add_executable(test_syntax tests/test_syntax.c)
-target_include_directories(test_syntax PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_syntax PRIVATE libloki test_framework)
-add_test(NAME test_syntax COMMAND test_syntax)
-
-# Unit tests for search functionality
-add_executable(test_search tests/test_search.c)
-target_include_directories(test_search PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_search PRIVATE libloki test_framework)
-add_test(NAME test_search COMMAND test_search)
-
-# Unit tests for buffer management
-add_executable(test_buffers tests/test_buffers.c)
-target_include_directories(test_buffers PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_buffers PRIVATE libloki test_framework)
-add_test(NAME test_buffers COMMAND test_buffers)
-
-# Unit tests for auto-indentation
-add_executable(test_indent tests/test_indent.c)
-target_include_directories(test_indent PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    ${LUA_INCLUDE_DIR}
-)
-target_link_libraries(test_indent PRIVATE libloki test_framework)
-add_test(NAME test_indent COMMAND test_indent)
+# Install
+install(TARGETS loki RUNTIME DESTINATION bin)
+install(DIRECTORY .loki DESTINATION share/loki)

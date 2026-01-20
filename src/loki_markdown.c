@@ -9,7 +9,7 @@
  */
 
 #include "loki_markdown.h"
-#include "loki_internal.h"
+#include "internal.h"
 #include "loki/core.h"
 #include <cmark.h>
 #include <stdlib.h>

@@ -85,10 +85,10 @@ void editor_insert_newline(editor_ctx_t *ctx);
  * File Operations
  * ============================================================================ */
 
-/* Save current buffer to file (returns 0 on success, 1 on error) */
+/* Save current buffer to file (returns 0 on success, -1 on error) */
 int editor_save(editor_ctx_t *ctx);
 
-/* Open a file */
+/* Open a file (returns 0 on success, -1 on error) */
 int editor_open(editor_ctx_t *ctx, char *filename);
 
 /* ============================================================================
@@ -197,6 +197,10 @@ void editor_poll_async_http(struct lua_State *L);
 
 /* Initialize the editor */
 void init_editor(editor_ctx_t *ctx);
+
+/* Set the context used for atexit cleanup.
+ * Call after buffers_init() to point to the buffer manager's context. */
+void editor_set_atexit_context(editor_ctx_t *ctx);
 
 /* Cleanup function (called at exit) */
 void editor_atexit(void);

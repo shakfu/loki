@@ -190,8 +190,7 @@ Edit `init.lua` to:
 
 ## Requirements
 
-- Lua or LuaJIT (installed via Homebrew)
-- libcurl (installed via Homebrew)
+- Lua or LuaJIT
+- libcurl
+- libuv
 - OpenAI API key (for AI functions)
-
-The binary is dynamically linked against system libraries, keeping it small (~72KB).

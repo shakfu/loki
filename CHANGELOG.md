@@ -17,6 +17,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **HTTP Support Restored**: Re-implemented async HTTP functionality that was removed during architecture refactor
+  - **New Module Structure**:
+    - Created `src/http.c` (470 lines) and `src/http.h` - dedicated HTTP module
+    - Clean separation from core editor code
+  - **Security Hardening**:
+    - URL validation: Only `http://` and `https://` schemes allowed
+    - URL length limit: Maximum 2048 characters
+    - Control character filtering in URLs
+    - Request body size limit: 5MB maximum
+    - Response size limit: 10MB maximum
+    - Rate limiting: 60 requests per minute
+    - Concurrent request limit: 10 simultaneous requests
+  - **Lua API**: `loki.async_http(url, method, body, headers, callback)`
+    - Non-blocking HTTP GET/POST requests
+    - Callback receives table with `status`, `body`, and `error` fields
+  - **Integration**:
+    - Added `loki_lua_bind_http()` function in lua.c
+    - Re-enabled `bind_http` option in `loki_lua_bootstrap()`
+    - HTTP tests re-enabled in CMakeLists.txt
+  - **Testing**: Both `test_http_security` and `test_http_simple` passing (19/19 total tests)
+  - **Files Added**: `src/http.c`, `src/http.h`
+  - **Files Modified**: `src/lua.c`, `include/loki/lua.h`, `CMakeLists.txt`
+
 ## [0.5.0]
 
 ### Added

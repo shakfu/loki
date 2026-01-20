@@ -7,9 +7,8 @@
  */
 
 #include "test_framework.h"
-#include "loki/core.h"
+#include "internal.h"
 #include "loki/lua.h"
-#include "loki_internal.h"
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
@@ -19,22 +18,36 @@
 /* Helper to create test context with Lua */
 static void init_test_ctx(editor_ctx_t *ctx) {
     editor_ctx_init(ctx);
-    ctx->L = loki_lua_bootstrap(ctx, NULL);
+
+    /* Allocate and initialize LuaHost */
+    ctx->lua_host = malloc(sizeof(LuaHost));
+    memset(ctx->lua_host, 0, sizeof(LuaHost));
+    ctx->lua_host->L = loki_lua_bootstrap(ctx, NULL);
 }
 
 /* Helper to cleanup test context */
 static void free_test_ctx(editor_ctx_t *ctx) {
-    if (ctx->L) {
-        lua_close(ctx->L);
-        ctx->L = NULL;
+    if (ctx->lua_host) {
+        if (ctx->lua_host->L) {
+            lua_close(ctx->lua_host->L);
+            ctx->lua_host->L = NULL;
+        }
+        free(ctx->lua_host);
+        ctx->lua_host = NULL;
     }
     editor_ctx_free(ctx);
+}
+
+/* Helper to get Lua state from context */
+static lua_State *get_lua(editor_ctx_t *ctx) {
+    return ctx->lua_host ? ctx->lua_host->L : NULL;
 }
 
 /* Test: Valid HTTPS URL */
 TEST(http_security_valid_https_url) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -46,7 +59,7 @@ TEST(http_security_valid_https_url) {
         ")\n"
         "return result ~= nil";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
 
     /* Should succeed or fail due to network, but not due to validation */
     ASSERT_EQ(result, 0);
@@ -58,6 +71,7 @@ TEST(http_security_valid_https_url) {
 TEST(http_security_valid_http_url) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -69,7 +83,7 @@ TEST(http_security_valid_http_url) {
         ")\n"
         "return result ~= nil";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
 
     free_test_ctx(&ctx);
@@ -79,6 +93,7 @@ TEST(http_security_valid_http_url) {
 TEST(http_security_reject_ftp_url) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -90,11 +105,11 @@ TEST(http_security_reject_ftp_url) {
         ")\n"
         "return result";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
 
     /* Should return nil (failed validation) */
-    ASSERT_TRUE(lua_isnil(ctx.L, -1));
+    ASSERT_TRUE(lua_isnil(L, -1));
 
     free_test_ctx(&ctx);
 }
@@ -103,6 +118,7 @@ TEST(http_security_reject_ftp_url) {
 TEST(http_security_reject_file_url) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -114,9 +130,9 @@ TEST(http_security_reject_file_url) {
         ")\n"
         "return result";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
-    ASSERT_TRUE(lua_isnil(ctx.L, -1));
+    ASSERT_TRUE(lua_isnil(L, -1));
 
     free_test_ctx(&ctx);
 }
@@ -125,6 +141,7 @@ TEST(http_security_reject_file_url) {
 TEST(http_security_reject_empty_url) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -136,9 +153,9 @@ TEST(http_security_reject_empty_url) {
         ")\n"
         "return result";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
-    ASSERT_TRUE(lua_isnil(ctx.L, -1));
+    ASSERT_TRUE(lua_isnil(L, -1));
 
     free_test_ctx(&ctx);
 }
@@ -147,6 +164,7 @@ TEST(http_security_reject_empty_url) {
 TEST(http_security_reject_url_without_scheme) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -158,9 +176,9 @@ TEST(http_security_reject_url_without_scheme) {
         ")\n"
         "return result";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
-    ASSERT_TRUE(lua_isnil(ctx.L, -1));
+    ASSERT_TRUE(lua_isnil(L, -1));
 
     free_test_ctx(&ctx);
 }
@@ -169,6 +187,7 @@ TEST(http_security_reject_url_without_scheme) {
 TEST(http_security_reject_long_url) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     /* Use Lua to create a URL longer than MAX_HTTP_URL_LENGTH (2048) */
     const char *code =
@@ -183,9 +202,9 @@ TEST(http_security_reject_long_url) {
         ")\n"
         "return result";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
-    ASSERT_TRUE(lua_isnil(ctx.L, -1));
+    ASSERT_TRUE(lua_isnil(L, -1));
 
     free_test_ctx(&ctx);
 }
@@ -194,6 +213,7 @@ TEST(http_security_reject_long_url) {
 TEST(http_security_valid_post_with_body) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -205,7 +225,7 @@ TEST(http_security_valid_post_with_body) {
         ")\n"
         "return result ~= nil";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
 
     free_test_ctx(&ctx);
@@ -215,6 +235,7 @@ TEST(http_security_valid_post_with_body) {
 TEST(http_security_reject_large_body) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     /* Note: Creating a 5MB+ string in Lua would be slow, so we test the concept */
     const char *code =
@@ -230,7 +251,7 @@ TEST(http_security_reject_large_body) {
         ")\n"
         "return result ~= nil";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
 
     /* 1MB should be accepted (limit is 5MB) */
     ASSERT_EQ(result, 0);
@@ -242,6 +263,7 @@ TEST(http_security_reject_large_body) {
 TEST(http_security_rate_limiting_basic) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     /* Make several requests in quick succession */
     const char *code =
@@ -258,12 +280,12 @@ TEST(http_security_rate_limiting_basic) {
         "end\n"
         "return count";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
 
     /* Should succeed - we're well under the rate limit */
-    ASSERT_TRUE(lua_isnumber(ctx.L, -1));
-    int count = (int)lua_tonumber(ctx.L, -1);
+    ASSERT_TRUE(lua_isnumber(L, -1));
+    int count = (int)lua_tonumber(L, -1);
     ASSERT_TRUE(count >= 5);  /* All 5 should succeed */
 
     free_test_ctx(&ctx);
@@ -273,6 +295,7 @@ TEST(http_security_rate_limiting_basic) {
 TEST(http_security_valid_headers) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -288,7 +311,7 @@ TEST(http_security_valid_headers) {
         ")\n"
         "return result ~= nil";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
 
     free_test_ctx(&ctx);
@@ -298,6 +321,7 @@ TEST(http_security_valid_headers) {
 TEST(http_security_concurrent_request_limit) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     /* Try to create more than MAX_ASYNC_REQUESTS (10)
      * Using example.com which won't complete quickly, keeping requests pending */
@@ -315,12 +339,12 @@ TEST(http_security_concurrent_request_limit) {
         "end\n"
         "return count";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
 
     /* Should be limited to MAX_ASYNC_REQUESTS (10) */
-    ASSERT_TRUE(lua_isnumber(ctx.L, -1));
-    int count = (int)lua_tonumber(ctx.L, -1);
+    ASSERT_TRUE(lua_isnumber(L, -1));
+    int count = (int)lua_tonumber(L, -1);
     ASSERT_TRUE(count <= 10);
 
     free_test_ctx(&ctx);
@@ -330,6 +354,7 @@ TEST(http_security_concurrent_request_limit) {
 TEST(http_security_reject_url_with_control_chars) {
     editor_ctx_t ctx;
     init_test_ctx(&ctx);
+    lua_State *L = get_lua(&ctx);
 
     const char *code =
         "local result = loki.async_http(\n"
@@ -341,9 +366,9 @@ TEST(http_security_reject_url_with_control_chars) {
         ")\n"
         "return result";
 
-    int result = luaL_dostring(ctx.L, code);
+    int result = luaL_dostring(L, code);
     ASSERT_EQ(result, 0);
-    ASSERT_TRUE(lua_isnil(ctx.L, -1));
+    ASSERT_TRUE(lua_isnil(L, -1));
 
     free_test_ctx(&ctx);
 }
