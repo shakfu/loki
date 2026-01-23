@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := all
-.PHONY: all build configure library editor repl all clean test show-config
+.PHONY: all build configure library loki all clean test show-config
 
 BUILD_DIR ?= build
 CMAKE ?= cmake
@@ -15,18 +15,13 @@ build: configure
 library: configure
 	@$(CMAKE) --build $(BUILD_DIR) --target libloki --config Release
 
-loki: editor
-
-editor: configure
-	@$(CMAKE) --build $(BUILD_DIR) --target loki-editor --config Release
-
-repl: configure
-	@$(CMAKE) --build $(BUILD_DIR) --target loki-repl --config Release
+loki: configure
+	@$(CMAKE) --build $(BUILD_DIR) --target loki --config Release
 
 show-config: configure
 	@$(CMAKE) --build $(BUILD_DIR) --target show-config --config Release
 
-test: editor repl
+test: build
 	@$(CMAKE) -E chdir $(BUILD_DIR) ctest --output-on-failure
 
 clean:
