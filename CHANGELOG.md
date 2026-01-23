@@ -17,6 +17,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Build Fix for Linux**: Fixed compilation failure when building with strict C99 mode (`CMAKE_C_EXTENSIONS OFF`)
+  - **Problem**: `pthread_rwlock_t` type unknown when `<uv.h>` was included in `src/async_queue.c`
+  - **Root Cause**: POSIX types require feature test macros to be defined before including system headers when compiling with `-std=c99` (strict mode without GNU extensions)
+  - **Solution**: Added `#define _POSIX_C_SOURCE 200809L` before includes in `src/async_queue.c`, consistent with `src/core.c`
+  - **Files Modified**: `src/async_queue.c`
+
 ### Added
 
 - **HTTP Support Restored**: Re-implemented async HTTP functionality that was removed during architecture refactor

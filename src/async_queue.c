@@ -3,7 +3,10 @@
  * Thread-safe ring buffer with libuv cross-thread notification.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "async_queue.h"
+#include <pthread.h>
 #include <uv.h>
 #include <stdlib.h>
 #include <string.h>
