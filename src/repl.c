@@ -3,7 +3,8 @@
  * @brief Common REPL infrastructure - line editor, terminal handling, history.
  *
  * This file contains the shared infrastructure used by all language REPLs.
- * Language-specific REPL implementations are in src/lang/{alda,joy,tr7}/repl.c
+ * When LOKI_USE_LINENOISE is defined, delegates to linenoise for line editing
+ * with tree-sitter syntax highlighting.
  */
 
 #include "repl.h"
@@ -15,8 +16,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <termios.h>
 #include <ctype.h>
+
+#ifdef LOKI_USE_LINENOISE
+#include <linenoise.h>
+#include "repl_linenoise.h"
+#endif
+
+#ifndef LOKI_USE_LINENOISE
+#include <termios.h>
+#endif
 
 /* ============================================================================
  * Line Editor State Management
@@ -25,6 +34,14 @@
 void repl_editor_init(ReplLineEditor *ed) {
     memset(ed, 0, sizeof(*ed));
     ed->history_idx = -1;
+
+#ifdef LOKI_USE_LINENOISE
+    /* Initialize linenoise context for Lua by default */
+    if (repl_linenoise_init(REPL_LANG_LUA) == 0) {
+        ed->ln_ctx = repl_linenoise_get_context();
+        ed->ln_lang = REPL_LANG_LUA;
+    }
+#endif
 }
 
 void repl_editor_cleanup(ReplLineEditor *ed) {
@@ -32,6 +49,12 @@ void repl_editor_cleanup(ReplLineEditor *ed) {
         free(ed->history[i]);
     }
     repl_completion_clear(ed);
+
+#ifdef LOKI_USE_LINENOISE
+    /* Don't destroy context here - it's managed by repl_linenoise module */
+    ed->ln_ctx = NULL;
+#endif
+
     memset(ed, 0, sizeof(*ed));
 }
 
@@ -40,9 +63,87 @@ void repl_set_completion_words(ReplLineEditor *ed, const char **words, int count
     ed->completion_word_count = count;
 }
 
+#ifdef LOKI_USE_LINENOISE
+/* Adapter structure to pass to linenoise completion callback */
+static ReplLineEditor *g_completion_editor = NULL;
+
+/* Linenoise completion callback adapter */
+static void linenoise_completion_adapter(const char *buf, linenoise_completions_t *lc) {
+    if (!g_completion_editor) return;
+    ReplLineEditor *ed = g_completion_editor;
+
+    /* Extract word prefix from end of buffer */
+    int pos = strlen(buf);
+    int start = pos;
+    while (start > 0 && !isspace((unsigned char)buf[start - 1])) {
+        start--;
+    }
+
+    char prefix[MAX_INPUT_LENGTH];
+    int word_len = pos - start;
+    if (word_len > 0 && word_len < MAX_INPUT_LENGTH) {
+        memcpy(prefix, buf + start, word_len);
+    }
+    prefix[word_len] = '\0';
+
+    /* Get completions from callback or word list */
+    char **completions = NULL;
+    int count = 0;
+
+    if (ed->completion_cb) {
+        completions = ed->completion_cb(prefix, &count, ed->completion_user_data);
+    } else if (ed->completion_words) {
+        /* Generate from word list */
+        for (int i = 0; i < ed->completion_word_count; i++) {
+            if (ed->completion_words[i] &&
+                strncmp(ed->completion_words[i], prefix, word_len) == 0) {
+                count++;
+            }
+        }
+        if (count > 0) {
+            completions = malloc(sizeof(char*) * count);
+            if (completions) {
+                int idx = 0;
+                for (int i = 0; i < ed->completion_word_count && idx < count; i++) {
+                    if (ed->completion_words[i] &&
+                        strncmp(ed->completion_words[i], prefix, word_len) == 0) {
+                        completions[idx] = strdup(ed->completion_words[i]);
+                        idx++;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Add completions to linenoise */
+    if (completions) {
+        for (int i = 0; i < count; i++) {
+            if (completions[i]) {
+                /* Build full line with completion */
+                char full[MAX_INPUT_LENGTH];
+                if (start + strlen(completions[i]) < MAX_INPUT_LENGTH) {
+                    memcpy(full, buf, start);
+                    strcpy(full + start, completions[i]);
+                    linenoise_add_completion(lc, full);
+                }
+                free(completions[i]);
+            }
+        }
+        free(completions);
+    }
+}
+#endif
+
 void repl_set_completion(ReplLineEditor *ed, ReplCompletionCallback cb, void *user_data) {
     ed->completion_cb = cb;
     ed->completion_user_data = user_data;
+
+#ifdef LOKI_USE_LINENOISE
+    if (ed->ln_ctx && cb) {
+        g_completion_editor = ed;
+        linenoise_set_completion_callback(ed->ln_ctx, linenoise_completion_adapter);
+    }
+#endif
 }
 
 void repl_completion_clear(ReplLineEditor *ed) {
@@ -75,10 +176,24 @@ void repl_add_history(ReplLineEditor *ed, const char *line) {
     }
 
     ed->history[ed->history_len++] = strdup(line);
+
+#ifdef LOKI_USE_LINENOISE
+    /* Also add to linenoise history */
+    if (ed->ln_ctx) {
+        linenoise_history_add(ed->ln_ctx, line);
+    }
+#endif
 }
 
 int repl_history_load(ReplLineEditor *ed, const char *filepath) {
     if (!ed || !filepath) return -1;
+
+#ifdef LOKI_USE_LINENOISE
+    /* Use linenoise history loading */
+    if (ed->ln_ctx) {
+        return linenoise_history_load(ed->ln_ctx, filepath);
+    }
+#endif
 
     FILE *f = fopen(filepath, "r");
     if (!f) return -1;  /* File doesn't exist yet, not an error */
@@ -103,6 +218,13 @@ int repl_history_load(ReplLineEditor *ed, const char *filepath) {
 int repl_history_save(ReplLineEditor *ed, const char *filepath) {
     if (!ed || !filepath || !filepath[0]) return -1;
 
+#ifdef LOKI_USE_LINENOISE
+    /* Use linenoise history saving */
+    if (ed->ln_ctx) {
+        return linenoise_history_save(ed->ln_ctx, filepath);
+    }
+#endif
+
     FILE *f = fopen(filepath, "w");
     if (!f) return -1;
 
@@ -115,9 +237,10 @@ int repl_history_save(ReplLineEditor *ed, const char *filepath) {
 }
 
 /* ============================================================================
- * Terminal Raw Mode
+ * Terminal Raw Mode (only needed without linenoise)
  * ============================================================================ */
 
+#ifndef LOKI_USE_LINENOISE
 /* Original termios for REPL raw mode (separate from editor) */
 static struct termios repl_orig_termios;
 static int repl_rawmode = 0;
@@ -139,12 +262,9 @@ int repl_enable_raw_mode(void) {
     raw = repl_orig_termios;
     /* Input modes: no break, no CR to NL, no parity, no strip, no flow ctrl */
     raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    /* Output modes - keep post processing for proper newline handling */
-    /* raw.c_oflag &= ~(OPOST); -- keep OPOST for REPL */
     /* Control modes - 8 bit chars */
     raw.c_cflag |= (CS8);
-    /* Local modes - echo off, canonical off, no extended functions
-     * Keep ISIG so Ctrl-C still works for interrupt */
+    /* Local modes - echo off, canonical off, no extended functions */
     raw.c_lflag &= ~(ECHO | ICANON | IEXTEN);
     /* Return each byte immediately */
     raw.c_cc[VMIN] = 1;
@@ -154,11 +274,23 @@ int repl_enable_raw_mode(void) {
     repl_rawmode = 1;
     return 0;
 }
+#else
+/* With linenoise, raw mode is handled internally */
+void repl_disable_raw_mode(void) {
+    /* No-op - linenoise handles raw mode */
+}
+
+int repl_enable_raw_mode(void) {
+    /* No-op - linenoise handles raw mode */
+    return 0;
+}
+#endif
 
 /* ============================================================================
- * Syntax Highlighting
+ * Syntax Highlighting (fallback for non-linenoise mode)
  * ============================================================================ */
 
+#ifndef LOKI_USE_LINENOISE
 static int repl_is_separator(int c, const char *separators) {
     if (isspace(c)) return 1;
     if (c == '\0') return 1;
@@ -239,7 +371,6 @@ void repl_highlight_line(editor_ctx_t *syntax_ctx, ReplLineEditor *ed) {
                 int kw2 = (klen > 0 && keywords[j][klen-1] == '|');
                 if (kw2) klen--;
 
-                /* Safety: skip zero-length keywords */
                 if (klen == 0) continue;
 
                 if ((int)(i + klen) <= ed->len &&
@@ -292,7 +423,6 @@ void repl_render_line(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *
 
     /* Position cursor */
     if (ed->pos < ed->len) {
-        /* Move cursor back from end */
         char pos[32];
         int plen = snprintf(pos, sizeof(pos), "\x1b[%dD", ed->len - ed->pos);
         terminal_buffer_append(&ab, pos, plen);
@@ -301,12 +431,76 @@ void repl_render_line(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *
     write(STDOUT_FILENO, ab.b, ab.len);
     terminal_buffer_free(&ab);
 }
+#else
+/* With linenoise, these are no-ops since linenoise handles rendering */
+void repl_highlight_line(editor_ctx_t *syntax_ctx, ReplLineEditor *ed) {
+    (void)syntax_ctx;
+    (void)ed;
+}
+
+void repl_render_line(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *prompt) {
+    (void)syntax_ctx;
+    (void)ed;
+    (void)prompt;
+}
+#endif
 
 /* ============================================================================
- * Tab Completion
+ * Line Reading
  * ============================================================================ */
 
-/* Find the start of the word at or before cursor position */
+#ifdef LOKI_USE_LINENOISE
+
+char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *prompt) {
+    (void)syntax_ctx;  /* Not needed - linenoise handles highlighting */
+
+    if (!ed->ln_ctx) {
+        /* Fallback: initialize linenoise if not done */
+        if (repl_linenoise_init(REPL_LANG_LUA) == 0) {
+            ed->ln_ctx = repl_linenoise_get_context();
+            ed->ln_lang = REPL_LANG_LUA;
+        }
+    }
+
+    if (!ed->ln_ctx) {
+        return NULL;  /* No linenoise context available */
+    }
+
+    /* Set up completion adapter */
+    if (ed->completion_cb || ed->completion_words) {
+        g_completion_editor = ed;
+        linenoise_set_completion_callback(ed->ln_ctx, linenoise_completion_adapter);
+    }
+
+    /* Read line using linenoise */
+    char *line = linenoise_read(ed->ln_ctx, prompt);
+
+    if (line == NULL) {
+        /* EOF or error */
+        ed->buf[0] = '\0';
+        ed->len = 0;
+        ed->pos = 0;
+        return NULL;
+    }
+
+    /* Copy result to editor buffer */
+    strncpy(ed->buf, line, MAX_INPUT_LENGTH - 1);
+    ed->buf[MAX_INPUT_LENGTH - 1] = '\0';
+    ed->len = strlen(ed->buf);
+    ed->pos = ed->len;
+
+    /* Free linenoise's allocated line */
+    linenoise_free(line);
+
+    return ed->buf;
+}
+
+#else
+
+/* ============================================================================
+ * Tab Completion (non-linenoise fallback)
+ * ============================================================================ */
+
 static int repl_find_word_start(const char *buf, int pos) {
     int start = pos;
     while (start > 0 && !isspace((unsigned char)buf[start - 1])) {
@@ -315,7 +509,6 @@ static int repl_find_word_start(const char *buf, int pos) {
     return start;
 }
 
-/* Generate completions from word list */
 static char **repl_completions_from_words(const char **words, int word_count,
                                            const char *prefix, int *out_count) {
     if (!words || word_count == 0) {
@@ -325,7 +518,6 @@ static char **repl_completions_from_words(const char **words, int word_count,
 
     size_t prefix_len = prefix ? strlen(prefix) : 0;
 
-    /* Count matches */
     int matches = 0;
     for (int i = 0; i < word_count; i++) {
         if (words[i] && strncmp(words[i], prefix, prefix_len) == 0) {
@@ -338,14 +530,12 @@ static char **repl_completions_from_words(const char **words, int word_count,
         return NULL;
     }
 
-    /* Allocate result array */
     char **result = malloc(sizeof(char*) * matches);
     if (!result) {
         *out_count = 0;
         return NULL;
     }
 
-    /* Fill matches */
     int idx = 0;
     for (int i = 0; i < word_count && idx < matches; i++) {
         if (words[i] && strncmp(words[i], prefix, prefix_len) == 0) {
@@ -364,31 +554,24 @@ static char **repl_completions_from_words(const char **words, int word_count,
     return result;
 }
 
-/* Handle TAB key - initiate or cycle through completions */
 static void repl_handle_tab(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *prompt) {
-    /* Need either a callback or a word list */
     if (!ed->completion_cb && !ed->completion_words) return;
 
     ReplCompletionState *cs = &ed->completion;
 
-    /* If we already have completions, cycle to next */
     if (cs->completions && cs->count > 0) {
         cs->index = (cs->index + 1) % cs->count;
 
-        /* Replace current completion with next one */
         int new_len = strlen(cs->completions[cs->index]);
         int old_completion_len = ed->pos - cs->word_start;
         int delta = new_len - old_completion_len;
 
-        /* Check if it fits */
         if (ed->len + delta >= MAX_INPUT_LENGTH) return;
 
-        /* Move text after cursor */
         memmove(&ed->buf[ed->pos + delta],
                 &ed->buf[ed->pos],
                 ed->len - ed->pos + 1);
 
-        /* Insert new completion */
         memcpy(&ed->buf[cs->word_start], cs->completions[cs->index], new_len);
 
         ed->len += delta;
@@ -399,18 +582,15 @@ static void repl_handle_tab(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const 
         return;
     }
 
-    /* Start new completion */
     int word_start = repl_find_word_start(ed->buf, ed->pos);
     int word_len = ed->pos - word_start;
 
-    /* Extract prefix */
     char prefix[MAX_INPUT_LENGTH];
     if (word_len > 0) {
         memcpy(prefix, &ed->buf[word_start], word_len);
     }
     prefix[word_len] = '\0';
 
-    /* Get completions - callback takes priority over word list */
     int count = 0;
     char **completions;
     if (ed->completion_cb) {
@@ -422,24 +602,20 @@ static void repl_handle_tab(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const 
     }
 
     if (!completions || count == 0) {
-        /* No completions - beep or do nothing */
         return;
     }
 
-    /* Store completion state */
     cs->completions = completions;
     cs->count = count;
     cs->index = 0;
     cs->word_start = word_start;
     cs->word_len = word_len;
 
-    /* If only one completion and it matches prefix exactly, do nothing */
     if (count == 1 && strcmp(completions[0], prefix) == 0) {
         repl_completion_clear(ed);
         return;
     }
 
-    /* Apply first completion */
     int new_len = strlen(completions[0]);
     int delta = new_len - word_len;
 
@@ -448,12 +624,10 @@ static void repl_handle_tab(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const 
         return;
     }
 
-    /* Move text after cursor */
     memmove(&ed->buf[ed->pos + delta],
             &ed->buf[ed->pos],
             ed->len - ed->pos + 1);
 
-    /* Insert completion */
     memcpy(&ed->buf[word_start], completions[0], new_len);
 
     ed->len += delta;
@@ -463,33 +637,25 @@ static void repl_handle_tab(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const 
     repl_render_line(syntax_ctx, ed, prompt);
 }
 
-/* ============================================================================
- * Line Reading
- * ============================================================================ */
-
 char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *prompt) {
-    /* Reset editor state for new line */
     ed->buf[0] = '\0';
     ed->len = 0;
     ed->pos = 0;
     ed->history_idx = -1;
 
-    /* Initial render */
     repl_render_line(syntax_ctx, ed, prompt);
 
     while (1) {
-        fflush(stdout); /* Ensure output is flushed before blocking read */
+        fflush(stdout);
         int c = terminal_read_key(STDIN_FILENO);
 
         if (c == ENTER) {
-            /* Submit line */
             write(STDOUT_FILENO, "\r\n", 2);
             ed->buf[ed->len] = '\0';
             return ed->buf;
         }
 
         if (c == CTRL_C) {
-            /* Cancel current line */
             ed->buf[0] = '\0';
             ed->len = 0;
             ed->pos = 0;
@@ -499,12 +665,10 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
 
         if (c == CTRL_D) {
-            /* EOF on empty line */
             if (ed->len == 0) {
                 write(STDOUT_FILENO, "\r\n", 2);
                 return NULL;
             }
-            /* Delete char at cursor */
             if (ed->pos < ed->len) {
                 memmove(&ed->buf[ed->pos], &ed->buf[ed->pos + 1], ed->len - ed->pos);
                 ed->len--;
@@ -515,13 +679,11 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
 
         if (c == TAB) {
-            /* Tab completion */
             repl_handle_tab(syntax_ctx, ed, prompt);
             continue;
         }
 
         if (c == BACKSPACE || c == CTRL_H) {
-            /* Delete char before cursor */
             if (ed->pos > 0) {
                 memmove(&ed->buf[ed->pos - 1], &ed->buf[ed->pos], ed->len - ed->pos + 1);
                 ed->pos--;
@@ -533,7 +695,6 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
 
         if (c == DEL_KEY) {
-            /* Delete char at cursor */
             if (ed->pos < ed->len) {
                 memmove(&ed->buf[ed->pos], &ed->buf[ed->pos + 1], ed->len - ed->pos);
                 ed->len--;
@@ -572,11 +733,9 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
 
         if (c == ARROW_UP) {
-            /* Previous history */
             if (ed->history_len == 0) continue;
 
             if (ed->history_idx == -1) {
-                /* Save current input */
                 memcpy(ed->saved_buf, ed->buf, ed->len + 1);
                 ed->saved_len = ed->len;
                 ed->history_idx = ed->history_len - 1;
@@ -586,7 +745,6 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
                 continue;
             }
 
-            /* Load history entry */
             strcpy(ed->buf, ed->history[ed->history_idx]);
             ed->len = strlen(ed->buf);
             ed->pos = ed->len;
@@ -596,7 +754,6 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
 
         if (c == ARROW_DOWN) {
-            /* Next history */
             if (ed->history_idx == -1) continue;
 
             if (ed->history_idx < ed->history_len - 1) {
@@ -605,7 +762,6 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
                 ed->len = strlen(ed->buf);
                 ed->pos = ed->len;
             } else {
-                /* Restore saved input */
                 ed->history_idx = -1;
                 memcpy(ed->buf, ed->saved_buf, ed->saved_len + 1);
                 ed->len = ed->saved_len;
@@ -617,7 +773,6 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
 
         if (c == CTRL_U) {
-            /* Clear line */
             ed->buf[0] = '\0';
             ed->len = 0;
             ed->pos = 0;
@@ -627,7 +782,6 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
 
         if (c == CTRL_K) {
-            /* Kill to end of line */
             ed->len = ed->pos;
             ed->buf[ed->len] = '\0';
             repl_completion_clear(ed);
@@ -635,7 +789,6 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
             continue;
         }
 
-        /* Insert printable character */
         if (c >= 32 && c < 127 && ed->len < MAX_INPUT_LENGTH - 1) {
             memmove(&ed->buf[ed->pos + 1], &ed->buf[ed->pos], ed->len - ed->pos + 1);
             ed->buf[ed->pos] = c;
@@ -646,3 +799,5 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
         }
     }
 }
+
+#endif /* LOKI_USE_LINENOISE */

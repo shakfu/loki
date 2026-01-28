@@ -34,6 +34,7 @@
 #define HL_TYPE_C 0
 #define HL_TYPE_MARKDOWN 1
 #define HL_TYPE_CSOUND 2
+#define HL_TYPE_TREESITTER 3
 
 /* Code block language constants (for markdown) */
 #define CB_LANG_NONE 0
@@ -106,6 +107,9 @@ struct undo_state;
 
 /* Shared audio/MIDI/Link context - see shared/context.h */
 struct SharedContext;
+
+/* Tree-sitter state - opaque pointer, defined in treesitter.c */
+struct TreeSitterState;
 
 /* Language state forward declarations - see src/lang_config.h */
 #include "lang_config.h"
@@ -182,6 +186,11 @@ typedef struct EditorModel {
     /* Language states - per-context state (NULL until initialized)
      * See lang_config.h to add new languages */
     LOKI_LANG_STATE_FIELDS
+
+#ifdef LOKI_USE_LINENOISE
+    /* Tree-sitter state for syntax highlighting (NULL if not available) */
+    struct TreeSitterState *ts_state;
+#endif
 } EditorModel;
 
 /* EditorView - Presentation state that is terminal/viewport-specific.

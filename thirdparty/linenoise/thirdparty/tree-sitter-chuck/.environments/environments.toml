@@ -1,0 +1,11 @@
+hide_help = true
+hide_default = true
+
+[[environments]]
+name = "default"
+
+[environments.todo]
+exclude_paths = ["bindings", "test"]
+
+[[environments]]
+name = "tree-sitter"

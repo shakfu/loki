@@ -1,0 +1,18 @@
+{
+  "parser-directories": [".."],
+  "theme": {
+    "class": "#f38ba8",
+    "comment": {
+      "color": "#585b70",
+      "italic": true
+    },
+    "keyword": "#f38ba8",
+    "number": {
+      "color": "#fab387",
+      "bold": true
+    },
+    "string": "#a6e3a1",
+    "type": "#89b4fa",
+    "unit-generator": "#cba6f7"
+  }
+}

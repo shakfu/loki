@@ -1,0 +1,50 @@
+{
+  "name": "tree-sitter-chuck",
+  "version": "0.1.0",
+  "description": "Chuck grammar for tree-sitter",
+  "repository": "https://github.com/tree-sitter/tree-sitter-chuck",
+  "license": "MIT",
+  "author": {
+    "name": "Ben Rosen",
+    "email": "benjamin.j.rosen@gmail.com"
+  },
+  "main": "bindings/node",
+  "types": "bindings/node",
+  "keywords": ["incremental", "parsing", "tree-sitter", "chuck"],
+  "files": [
+    "grammar.js",
+    "tree-sitter.json",
+    "binding.gyp",
+    "prebuilds/**",
+    "bindings/node/*",
+    "queries/*",
+    "src/**",
+    "*.wasm"
+  ],
+  "dependencies": {
+    "node-addon-api": "^8.3.1",
+    "node-gyp-build": "^4.8.4"
+  },
+  "devDependencies": {
+    "prebuildify": "^6.0.1",
+    "prettier": "^3.5.3",
+    "tree-sitter-cli": "^0.24.4",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "tree-sitter": "latest",
+    "typescript": "^5"
+  },
+  "peerDependenciesMeta": {
+    "tree-sitter": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "install": "node-gyp-build",
+    "prestart": "tree-sitter build --wasm",
+    "start": "tree-sitter playground",
+    "test": "node --test bindings/node/*_test.js"
+  },
+  "private": true
+}

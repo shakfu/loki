@@ -8,6 +8,11 @@
 
 #include "internal.h"
 
+#ifdef LOKI_USE_LINENOISE
+#include <linenoise.h>
+#include "repl_linenoise.h"
+#endif
+
 #define MAX_INPUT_LENGTH 1024
 #define REPL_HISTORY_MAX 64
 
@@ -63,6 +68,12 @@ typedef struct {
 
     /* Completion state */
     ReplCompletionState completion;        /* Current completion state */
+
+#ifdef LOKI_USE_LINENOISE
+    /* Linenoise context for this editor */
+    linenoise_context_t *ln_ctx;
+    ReplLanguage ln_lang;            /* Language for syntax highlighting */
+#endif
 } ReplLineEditor;
 
 /* Initialize line editor state */

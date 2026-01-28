@@ -1,7 +1,8 @@
 /* loki_syntax.c - Syntax highlighting implementation
  *
  * This module implements syntax highlighting for the loki editor.
- * It uses a simple token-based approach with support for:
+ * When LOKI_USE_LINENOISE is defined, it uses tree-sitter for AST-based
+ * highlighting. Otherwise falls back to token-based approach with support for:
  * - Keywords (primary and type keywords)
  * - String literals (with escape sequence handling)
  * - Single-line and multi-line comments
@@ -18,6 +19,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
+
+#ifdef LOKI_USE_LINENOISE
+#include "treesitter.h"
+#endif
 
 /* ====================== Syntax highlight color scheme  ==================== */
 
@@ -63,7 +68,15 @@ void syntax_update_row(editor_ctx_t *ctx, t_erow *row) {
 
     int default_ran = 0;
 
-    if (ctx->view.syntax != NULL) {
+#ifdef LOKI_USE_LINENOISE
+    /* Try tree-sitter highlighting first */
+    if (ctx->model.ts_state != NULL) {
+        treesitter_update_row(ctx, row, ctx->model.ts_state);
+        default_ran = 1;
+    }
+#endif
+
+    if (!default_ran && ctx->view.syntax != NULL) {
         if (ctx->view.syntax->type == HL_TYPE_MARKDOWN) {
             editor_update_syntax_markdown(ctx, row);
             default_ran = 1;

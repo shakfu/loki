@@ -12,7 +12,9 @@ typedef void (*loki_lua_report_fn)(const char *message, void *userdata);
 
 struct loki_lua_opts {
     int bind_editor;           /* Non-zero to load editor bindings */
+#ifdef LOKI_ENABLE_HTTP
     int bind_http;             /* Non-zero to load HTTP bindings (loki.async_http) */
+#endif
     int load_config;           /* Non-zero to load .psnd/init.lua and ~/.psnd/init.lua */
     const char *config_override; /* Optional absolute path to init.lua */
     const char *project_root;  /* Optional project root for .psnd/ discovery */
@@ -25,7 +27,9 @@ lua_State *loki_lua_bootstrap(editor_ctx_t *ctx, const struct loki_lua_opts *opt
 const char *loki_lua_runtime(void);
 void loki_lua_bind_minimal(lua_State *L);
 void loki_lua_bind_editor(lua_State *L);
+#ifdef LOKI_ENABLE_HTTP
 void loki_lua_bind_http(lua_State *L);
+#endif
 int loki_lua_load_config(lua_State *L, const struct loki_lua_opts *opts);
 void loki_lua_install_namespaces(lua_State *L);
 

@@ -35,7 +35,9 @@
 #include "command.h"  /* Command mode and ex-style commands */
 #include "lang_bridge.h"  /* Language bridge for Lua API registration */
 #include "buffers.h"    /* Buffer management for buffer_get_current() */
+#ifdef LOKI_ENABLE_HTTP
 #include "http.h"       /* Async HTTP support */
+#endif
 #include "shared/context.h"  /* SharedContext for launch_quantize */
 #include "shared/midi/midi.h"  /* MIDI port functions */
 
@@ -1151,6 +1153,7 @@ void loki_lua_bind_editor(lua_State *L) {
     loki_lang_register_lua_apis(L);
 }
 
+#ifdef LOKI_ENABLE_HTTP
 /* Bind HTTP API - adds loki.async_http */
 void loki_lua_bind_http(lua_State *L) {
     if (!L) return;
@@ -1166,6 +1169,7 @@ void loki_lua_bind_http(lua_State *L) {
 
     lua_setglobal(L, "loki");
 }
+#endif /* LOKI_ENABLE_HTTP */
 
 static void loki_lua_report(const struct loki_lua_opts *opts, const char *fmt, ...) {
     if (!fmt) return;
@@ -1387,7 +1391,9 @@ const char *loki_lua_runtime(void) {
 lua_State *loki_lua_bootstrap(editor_ctx_t *ctx, const struct loki_lua_opts *opts) {
     struct loki_lua_opts effective = {
         .bind_editor = 1,
+#ifdef LOKI_ENABLE_HTTP
         .bind_http = 1,  /* HTTP support enabled */
+#endif
         .load_config = 1,
         .config_override = NULL,
         .project_root = NULL,
@@ -1398,7 +1404,9 @@ lua_State *loki_lua_bootstrap(editor_ctx_t *ctx, const struct loki_lua_opts *opt
 
     if (opts) {
         effective.bind_editor = opts->bind_editor ? 1 : 0;
+#ifdef LOKI_ENABLE_HTTP
         effective.bind_http = opts->bind_http ? 1 : 0;
+#endif
         effective.load_config = opts->load_config ? 1 : 0;
         effective.config_override = opts->config_override;
         effective.project_root = opts->project_root;
@@ -1468,9 +1476,11 @@ lua_State *loki_lua_bootstrap(editor_ctx_t *ctx, const struct loki_lua_opts *opt
         loki_lua_bind_minimal(L);
     }
 
+#ifdef LOKI_ENABLE_HTTP
     if (effective.bind_http) {
         loki_lua_bind_http(L);
     }
+#endif
 
     if (effective.load_config) {
         if (loki_lua_load_config(L, &effective) < 0) {

@@ -10,22 +10,23 @@ A lightweight, modular text editor built on antirez's [kilo](https://github.com/
 - **Fast**: Direct VT100 escape sequences, no curses overhead
 - **Robust**: All critical bugs fixed (buffer overflows, NULL checks, signal safety)
 - **Safe**: Binary file detection, proper error handling
-- **Syntax highlighting**: C/C++ built-in, extensible via Lua
+- **Syntax highlighting**: Tree-sitter AST-based highlighting (Lua, Python, Scheme, Haskell, Markdown)
 - **Modal editing**: Vim-like modes (NORMAL/INSERT/VISUAL) with h/j/k/l navigation
 
 ### Lua Scripting Engine
 - **Lua/LuaJIT**: Full Lua environment for extensibility
 - **Project-local config**: `.loki/init.lua` overrides `~/.loki/init.lua`
-- **Interactive console**: Toggle the collapsible Lua REPL with `Ctrl-L`
+- **Interactive console**: Toggle the collapsible Lua REPL with `Ctrl-L` (with syntax highlighting via linenoise)
 - **Built-in helpers**: `help`, `history`, `clear`, `clear-history`, `exit`
 - **Full standard library**: io, os, math, string, table, etc.
 
-### Async HTTP Integration
+### Async HTTP Integration (Optional)
 - **Non-blocking requests**: Editor stays responsive during API calls
 - **AI-ready**: OpenAI, Anthropic Claude, local LLM integration
 - **Multi-concurrent**: Up to 10 simultaneous requests
 - **Callback-based**: Clean async pattern with Lua callbacks
 - **libcurl-powered**: Reliable, battle-tested HTTP client
+- **Opt-in**: Disabled by default, enable with `-DLOKI_ENABLE_HTTP=ON`
 
 ### Smart Configuration
 - **Local override**: Project-specific `.loki/` config takes precedence
@@ -46,6 +47,7 @@ src/
 ├── selection.c          - Selection tracking and OSC 52 clipboard
 ├── search.c             - Incremental search with highlighting
 ├── syntax.c             - Syntax highlighting infrastructure
+├── treesitter.c         - Tree-sitter AST-based syntax highlighting
 ├── languages.c          - Language definitions (C, Python, Lua, etc.)
 ├── command.c            - Ex-style command mode (:w, :q, etc.)
 ├── undo.c               - Undo/redo with operation grouping
@@ -55,6 +57,7 @@ src/
 ├── session.c            - Session management (opaque EditorSession handles)
 ├── editor.c             - Main editor loop
 ├── repl.c               - Standalone Lua REPL
+├── repl_linenoise.c     - Linenoise integration for REPL line editing
 └── main.c               - Entry point
 ```
 
@@ -69,8 +72,8 @@ src/
 ### Install Dependencies (macOS)
 
 ```bash
-brew install lua curl libuv  # or: luajit instead of lua
-# Optional: brew install readline  # enables enhanced CLI history/completion
+brew install lua libuv  # or: luajit instead of lua
+# Optional: brew install curl  # required for async HTTP support (-DLOKI_ENABLE_HTTP=ON)
 ```
 
 cmark (CommonMark parser) is vendored in `thirdparty/` and built automatically.
@@ -85,6 +88,10 @@ make
 
 # Run tests
 make test
+
+# Enable async HTTP support (requires libcurl)
+cmake -DLOKI_ENABLE_HTTP=ON ..
+make
 ```
 
 The build produces `build/loki` (main executable) and `build/libloki.a` (static library).
@@ -321,9 +328,10 @@ This is a fork with enhancements:
 
 **Dependencies:**
 - Lua or LuaJIT
-- libcurl
 - libuv
 - cmark (vendored)
+- linenoise with tree-sitter (vendored)
+- libcurl (optional, for async HTTP)
 
 
 ## Credits

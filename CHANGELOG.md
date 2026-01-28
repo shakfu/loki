@@ -17,6 +17,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **Linenoise Integration**: Replaced editline/readline with linenoise fork for REPL line editing
+  - **Tree-sitter syntax highlighting**: Real-time syntax coloring as you type in the REPL
+  - **Supported languages**: Lua, Python, Scheme, Haskell, Markdown
+  - **Cross-platform**: Consistent behavior across macOS and Linux
+  - **Features**: Command history, completion callbacks, multiline editing support
+  - **Files Added**: `src/repl_linenoise.c`, `src/repl_linenoise.h`
+  - **Files Modified**: `src/repl.c`, `src/repl.h`, `CMakeLists.txt`
+  - **Vendored**: `thirdparty/linenoise/` with tree-sitter grammars
+
+- **Tree-sitter Editor Highlighting**: AST-based syntax highlighting for editor buffers
+  - **Replaces**: Old keyword-based lexical analysis with accurate tree-sitter parsing
+  - **Supported languages**: Lua, Python, Scheme, Haskell, Markdown
+  - **Incremental parsing**: Efficient updates on text changes
+  - **Capture mapping**: Tree-sitter captures mapped to existing HL_KEYWORD1, HL_STRING, etc. constants
+  - **Files Added**: `src/treesitter.c`, `src/treesitter.h`
+  - **Files Modified**: `src/syntax.c`, `src/editor.c`, `src/internal.h`
+
+- **Interactive REPL Test**: Added `test_linenoise_repl` for manual testing of linenoise integration
+  - Tests syntax highlighting, history, and line editing
+  - Not included in automated test suite (requires interactive terminal)
+
+### Changed
+
+- **Async HTTP Now Optional**: HTTP support is disabled by default to reduce dependencies
+  - **Enable with**: `cmake -DLOKI_ENABLE_HTTP=ON ..`
+  - **Requires**: libcurl when enabled
+  - **Compile-time guarded**: Uses `#ifdef LOKI_ENABLE_HTTP` throughout codebase
+  - **Affected files**: `CMakeLists.txt`, `src/lua.c`, `src/editor.c`, `src/session.c`, `include/loki/lua.h`
+  - HTTP tests only built/run when HTTP is enabled
+  - Removed stale HTTP declarations from `include/loki/core.h`
+
 ### Fixed
 
 - **Build Fix for Linux**: Fixed compilation failure when building with strict C99 mode (`CMAKE_C_EXTENSIONS OFF`)

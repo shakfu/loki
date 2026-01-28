@@ -33,6 +33,10 @@
 #include "async_queue.h"
 #include "shared/context.h"
 
+#ifdef LOKI_USE_LINENOISE
+#include "treesitter.h"
+#endif
+
 /* ======================== Main Editor Instance ============================ */
 
 /* Note: Editor context is now local to loki_editor_main() and managed by
@@ -315,6 +319,17 @@ int loki_editor_main(int argc, char **argv) {
     /* Initialize editor core */
     init_editor(&E);
     syntax_select_for_filename(&E, filename);
+
+#ifdef LOKI_USE_LINENOISE
+    /* Initialize tree-sitter for this file type */
+    {
+        const char *ts_lang = treesitter_lang_from_filename(filename);
+        if (ts_lang) {
+            E.model.ts_state = treesitter_init(ts_lang);
+        }
+    }
+#endif
+
     editor_open(&E, (char*)filename);
 
     /* Initialize LuaHost */
@@ -324,7 +339,9 @@ int loki_editor_main(int argc, char **argv) {
     } else {
         struct loki_lua_opts opts = {
             .bind_editor = 1,
+#ifdef LOKI_ENABLE_HTTP
             .bind_http = 0,
+#endif
             .load_config = 1,
             .config_override = NULL,
             .project_root = NULL,
@@ -449,6 +466,14 @@ void editor_cleanup_resources(editor_ctx_t *ctx) {
         free(ctx->model.shared);
         ctx->model.shared = NULL;
     }
+
+#ifdef LOKI_USE_LINENOISE
+    /* Clean up tree-sitter state */
+    if (ctx->model.ts_state) {
+        treesitter_free(ctx->model.ts_state);
+        ctx->model.ts_state = NULL;
+    }
+#endif
 
     /* Clean up async event queue */
     async_queue_cleanup();

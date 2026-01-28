@@ -178,7 +178,9 @@ EditorSession *editor_session_new(const EditorConfig *config) {
 
                 struct loki_lua_opts opts = {
                     .bind_editor = 1,
+#ifdef LOKI_ENABLE_HTTP
                     .bind_http = 0,
+#endif
                     .load_config = 1,
                     .config_override = NULL,
                     .project_root = NULL,

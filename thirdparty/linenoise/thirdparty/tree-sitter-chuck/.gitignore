@@ -1,0 +1,7 @@
+.direnv
+.env
+.envrc
+.helix/config.toml
+build
+node_modules
+result

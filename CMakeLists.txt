@@ -11,83 +11,23 @@ endif()
 
 option(LOKI_BUILD_SHARED "Build libloki as a shared library" OFF)
 option(BUILD_TESTS "Build unit tests" ON)
+option(LOKI_ENABLE_HTTP "Enable async HTTP support (requires libcurl)" OFF)
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
 find_package(Lua REQUIRED)
-find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
+
+# Optional: libcurl for async HTTP
+if(LOKI_ENABLE_HTTP)
+    find_package(CURL REQUIRED)
+endif()
 
 # Find libuv for async support
 pkg_check_modules(LIBUV REQUIRED libuv)
 
-# Line editing library detection (editline preferred over readline due to BSD license)
-set(LINEEDIT_FOUND FALSE)
-set(LINEEDIT_LIBRARY "")
-set(LINEEDIT_INCLUDE_DIR "")
-set(LINEEDIT_TYPE "none")
-
-# Try editline first (BSD license, more permissive than GPL readline)
-find_path(EDITLINE_INCLUDE_DIR
-    NAMES histedit.h
-    PATHS /usr/include /usr/local/include /opt/local/include
-)
-find_library(EDITLINE_LIBRARY
-    NAMES edit
-    PATHS /usr/lib /usr/local/lib /opt/local/lib
-)
-
-if (EDITLINE_INCLUDE_DIR AND EDITLINE_LIBRARY)
-    set(LINEEDIT_FOUND TRUE)
-    set(LINEEDIT_LIBRARY ${EDITLINE_LIBRARY})
-    set(LINEEDIT_INCLUDE_DIR ${EDITLINE_INCLUDE_DIR})
-    set(LINEEDIT_TYPE "editline")
-    message(STATUS "Found editline: ${EDITLINE_LIBRARY}")
-else()
-    # Try readline as fallback
-    find_package(Readline QUIET)
-
-    if (NOT Readline_FOUND)
-        # Try Homebrew readline on macOS
-        execute_process(
-            COMMAND brew --prefix readline
-            OUTPUT_VARIABLE BREW_READLINE_PREFIX
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-        )
-        if (BREW_READLINE_PREFIX)
-            find_path(READLINE_INCLUDE_DIR
-                NAMES readline/readline.h
-                HINTS
-                    ${BREW_READLINE_PREFIX}/include
-                    ${BREW_READLINE_PREFIX}/include/readline
-            )
-            find_library(READLINE_LIBRARY
-                NAMES readline
-                HINTS ${BREW_READLINE_PREFIX}/lib
-            )
-            if (READLINE_INCLUDE_DIR AND READLINE_LIBRARY)
-                set(Readline_FOUND ON)
-                set(Readline_INCLUDE_DIR ${READLINE_INCLUDE_DIR})
-                set(Readline_LIBRARY ${READLINE_LIBRARY})
-            endif()
-        endif()
-    endif()
-
-    if (Readline_FOUND)
-        set(LINEEDIT_FOUND TRUE)
-        set(LINEEDIT_LIBRARY ${Readline_LIBRARY})
-        set(LINEEDIT_INCLUDE_DIR ${Readline_INCLUDE_DIR})
-        set(LINEEDIT_TYPE "readline")
-        message(STATUS "Found readline: ${Readline_LIBRARY}")
-    endif()
-endif()
-
-if (NOT LINEEDIT_FOUND)
-    message(STATUS "Line editing library not found; loki-repl will use basic fallback (no history/completion)")
-    message(STATUS "  To enable features: brew install readline (or apt-get install libedit-dev on Linux)")
-endif()
-
+# Linenoise line editing library (with tree-sitter syntax highlighting)
+# Built from thirdparty/linenoise
 add_subdirectory(thirdparty)
 
 set(LOKI_LIBRARY_TYPE STATIC)
@@ -126,9 +66,15 @@ set(LOKI_SOURCES
     src/jsonrpc.c
     src/repl_helpers.c
     src/repl.c
+    src/repl_linenoise.c
+    src/treesitter.c
     src/loki_markdown.c
-    src/http.c
 )
+
+# Optional HTTP support
+if(LOKI_ENABLE_HTTP)
+    list(APPEND LOKI_SOURCES src/http.c)
+endif()
 
 add_library(libloki ${LOKI_LIBRARY_TYPE} ${LOKI_SOURCES})
 
@@ -137,10 +83,16 @@ target_include_directories(libloki
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${LUA_INCLUDE_DIR}
-        ${CURL_INCLUDE_DIRS}
         ${LIBUV_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/cmark/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/linenoise/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/linenoise/thirdparty/tree-sitter/lib/include
 )
+
+# Add CURL include directories if HTTP enabled
+if(LOKI_ENABLE_HTTP)
+    target_include_directories(libloki PUBLIC ${CURL_INCLUDE_DIRS})
+endif()
 
 target_compile_options(libloki PRIVATE -Wall -Wextra -pedantic)
 
@@ -149,42 +101,58 @@ target_link_directories(libloki PUBLIC ${LIBUV_LIBRARY_DIRS})
 target_link_libraries(libloki
     PUBLIC
         ${LUA_LIBRARIES}
-        CURL::libcurl
         Threads::Threads
         ${CMAKE_DL_LIBS}
         ${LIBUV_LIBRARIES}
         cmark
+        linenoise
+        linenoise-theme
+        linenoise-highlight-lua
+        linenoise-highlight-python
+        linenoise-highlight-scheme
+        linenoise-highlight-haskell
+        linenoise-highlight-markdown
+        tree-sitter
+        tree-sitter-lua
+        tree-sitter-python
+        tree-sitter-scheme
+        tree-sitter-haskell
+        tree-sitter-markdown
 )
+
+# Link CURL if HTTP enabled
+if(LOKI_ENABLE_HTTP)
+    target_link_libraries(libloki PUBLIC CURL::libcurl)
+    target_compile_definitions(libloki PUBLIC LOKI_ENABLE_HTTP=1)
+endif()
 
 if (NOT MSVC)
     target_link_libraries(libloki PUBLIC m)
 endif()
+
+# Linenoise compile definition for REPL
+target_compile_definitions(libloki PUBLIC LOKI_USE_LINENOISE=1)
 
 # Main executable
 add_executable(loki src/main.c)
 target_compile_options(loki PRIVATE -Wall -Wextra -pedantic)
 target_link_libraries(loki PRIVATE libloki)
 
-if (LINEEDIT_FOUND)
-    target_include_directories(loki PRIVATE ${LINEEDIT_INCLUDE_DIR})
-    target_link_libraries(loki PRIVATE ${LINEEDIT_LIBRARY})
-    if (LINEEDIT_TYPE STREQUAL "editline")
-        target_compile_definitions(loki PRIVATE LOKI_HAVE_EDITLINE=1)
-    else()
-        target_compile_definitions(loki PRIVATE LOKI_HAVE_READLINE=1)
-    endif()
-    message(STATUS "loki will use ${LINEEDIT_TYPE} for line editing (history, completion)")
+message(STATUS "loki will use linenoise for line editing (with tree-sitter syntax highlighting)")
+
+if(LOKI_ENABLE_HTTP)
+    set(HTTP_STATUS "enabled")
+else()
+    set(HTTP_STATUS "disabled - use -DLOKI_ENABLE_HTTP=ON to enable")
 endif()
 
 add_custom_target(show-config
     COMMAND ${CMAKE_COMMAND} -E echo "Lua include: ${LUA_INCLUDE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E echo "Lua libraries: ${LUA_LIBRARIES}"
-    COMMAND ${CMAKE_COMMAND} -E echo "libcurl include: ${CURL_INCLUDE_DIRS}"
-    COMMAND ${CMAKE_COMMAND} -E echo "libcurl libraries: ${CURL_LIBRARIES}"
     COMMAND ${CMAKE_COMMAND} -E echo "libuv include: ${LIBUV_INCLUDE_DIRS}"
     COMMAND ${CMAKE_COMMAND} -E echo "libuv libraries: ${LIBUV_LIBRARIES}"
-    COMMAND ${CMAKE_COMMAND} -E echo "Line editing: ${LINEEDIT_TYPE}"
-    COMMAND ${CMAKE_COMMAND} -E echo "Line edit library: ${LINEEDIT_LIBRARY}"
+    COMMAND ${CMAKE_COMMAND} -E echo "Line editing: linenoise with tree-sitter"
+    COMMAND ${CMAKE_COMMAND} -E echo "Async HTTP: ${HTTP_STATUS}"
 )
 
 # Tests
@@ -233,26 +201,44 @@ if(BUILD_TESTS)
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
 
-    # HTTP tests
-    add_executable(test_http_security tests/test_http_security.c)
-    target_include_directories(test_http_security PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests
-        ${LUA_INCLUDE_DIR}
-    )
-    target_link_libraries(test_http_security PRIVATE libloki test_framework)
-    add_test(NAME test_http_security COMMAND test_http_security)
+    # HTTP tests (only if HTTP enabled)
+    if(LOKI_ENABLE_HTTP)
+        add_executable(test_http_security tests/test_http_security.c)
+        target_include_directories(test_http_security PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+            ${LUA_INCLUDE_DIR}
+        )
+        target_link_libraries(test_http_security PRIVATE libloki test_framework)
+        add_test(NAME test_http_security COMMAND test_http_security)
 
-    add_executable(test_http_simple tests/test_http_simple.c)
-    target_include_directories(test_http_simple PRIVATE
+        add_executable(test_http_simple tests/test_http_simple.c)
+        target_include_directories(test_http_simple PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+            ${LUA_INCLUDE_DIR}
+        )
+        target_link_libraries(test_http_simple PRIVATE libloki test_framework)
+        add_test(NAME test_http_simple COMMAND test_http_simple)
+    endif()
+
+    # Interactive linenoise REPL test (not run automatically)
+    add_executable(test_linenoise_repl tests/test_linenoise_repl.c)
+    target_include_directories(test_linenoise_repl PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests
-        ${LUA_INCLUDE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/linenoise/include
     )
-    target_link_libraries(test_http_simple PRIVATE libloki test_framework)
-    add_test(NAME test_http_simple COMMAND test_http_simple)
+    target_link_libraries(test_linenoise_repl PRIVATE
+        linenoise
+        linenoise-theme
+        linenoise-highlight-lua
+        tree-sitter
+        tree-sitter-lua
+    )
+    target_compile_definitions(test_linenoise_repl PRIVATE LOKI_USE_LINENOISE=1)
 endif()
 
 # Install

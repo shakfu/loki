@@ -173,25 +173,6 @@ void editor_set_selection(int start_x, int start_y, int end_x, int end_y);
 void editor_clear_selection(void);
 
 /* ============================================================================
- * Async HTTP (for Lua integration)
- * ============================================================================ */
-
-/* Start an async HTTP request
- * Returns request ID on success, -1 on failure
- * The callback is a Lua function name (global) */
-int editor_start_async_http(
-    const char *url,
-    const char *method,
-    const char *body,
-    const char **headers,
-    int num_headers,
-    const char *lua_callback
-);
-
-/* Poll async HTTP requests (called from main loop) */
-void editor_poll_async_http(struct lua_State *L);
-
-/* ============================================================================
  * Initialization and Cleanup
  * ============================================================================ */
 

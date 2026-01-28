@@ -1135,6 +1135,9 @@ void init_editor(editor_ctx_t *ctx) {
     ctx->view.sel_active = 0;
     ctx->view.sel_start_x = ctx->view.sel_start_y = 0;
     ctx->view.sel_end_x = ctx->view.sel_end_y = 0;
+#ifdef LOKI_USE_LINENOISE
+    ctx->model.ts_state = NULL;
+#endif
     syntax_init_default_colors(ctx);
     /* Lua REPL init and Lua initialization are in loki_editor.c */
     terminal_update_window_size(ctx);
