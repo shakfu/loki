@@ -84,6 +84,7 @@ if(WITH_TREESITTER)
         target_compile_options(tree-sitter PRIVATE /w)
     else()
         target_compile_options(tree-sitter PRIVATE -w)
+        target_compile_definitions(tree-sitter PRIVATE _DEFAULT_SOURCE)
     endif()
 
     # Syntax highlighting theme library
