@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(loki VERSION 0.1.0 LANGUAGES C)
+project(loki VERSION 0.5.1 LANGUAGES C)
 
 # C11: async_queue.c uses _Atomic, which is not available in C99.
 set(CMAKE_C_STANDARD 11)
