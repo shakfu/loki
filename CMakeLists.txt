@@ -12,6 +12,13 @@ set(CMAKE_C_EXTENSIONS OFF)
 # target in this directory, tests included.
 add_compile_definitions(_POSIX_C_SOURCE=200809L)
 
+# On Darwin that macro also switches the system headers into strict POSIX mode,
+# which hides the BSD extensions loki needs (SIGWINCH, TIOCGWINSZ).
+# _DARWIN_C_SOURCE restores the full namespace without dropping the POSIX one.
+if(APPLE)
+    add_compile_definitions(_DARWIN_C_SOURCE)
+endif()
+
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
