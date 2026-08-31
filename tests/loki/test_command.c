@@ -28,7 +28,7 @@ static void setup_test_dir(void) {
 
 /* Helper: Clean up test files */
 static void cleanup_test_dir(void) {
-    system("rm -rf " TEST_DIR);
+    (void)!system("rm -rf " TEST_DIR);
 }
 
 /* Helper: Initialize editor context for command mode testing */

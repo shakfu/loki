@@ -17,6 +17,7 @@
 #include "languages.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>  /* strcasecmp */
 #include <ctype.h>
 #include <stdio.h>
 
@@ -61,12 +62,20 @@ int syntax_name_to_code(const char *name) {
 /* Set every byte of row->hl (that corresponds to every character in the line)
  * to the right syntax highlight type (HL_* defines). */
 void syntax_update_row(editor_ctx_t *ctx, t_erow *row) {
+    /* realloc(ptr, 0) frees ptr and returns NULL, so bailing out on NULL below
+     * would leave row->hl dangling for a later free. Handle empty rows first. */
+    if (row->rsize == 0) {
+        free(row->hl);
+        row->hl = NULL;
+        return;
+    }
     unsigned char *new_hl = realloc(row->hl,row->rsize);
     if (new_hl == NULL) return; /* Out of memory, keep old highlighting */
     row->hl = new_hl;
     memset(row->hl,HL_NORMAL,row->rsize);
 
     int default_ran = 0;
+    int prev_cb_lang = row->cb_lang;   /* to detect code-block state changes */
 
 #ifdef LOKI_USE_LINENOISE
     /* Try tree-sitter highlighting first */
@@ -214,14 +223,16 @@ void syntax_update_row(editor_ctx_t *ctx, t_erow *row) {
         }
     }
 
-    /* Lua custom highlighting is in loki_editor.c */
-    (void)default_ran; /* Suppress unused variable warning */
+    /* Let the Lua `loki.highlight_row` hook post-process this row. */
+    lua_apply_highlight_row(ctx, row, default_ran);
 
     /* Propagate syntax change to the next row if the open comment
      * state changed. This may recursively affect all the following rows
      * in the file. */
     int oc = syntax_row_has_open_comment(row);
-    if (row->hl_oc != oc && row->idx+1 < ctx->model.numrows)
+    int cb_changed = (row->cb_lang != prev_cb_lang);
+    if ((row->hl_oc != oc || cb_changed) &&
+        row->idx >= 0 && row->idx+1 < ctx->model.numrows)
         syntax_update_row(ctx, &ctx->model.row[row->idx+1]);
     row->hl_oc = oc;
 }
@@ -237,7 +248,9 @@ int syntax_format_color(editor_ctx_t *ctx, int hl, char *buf, size_t bufsize) {
 }
 
 /* Select the syntax highlight scheme depending on the filename. */
-void syntax_select_for_filename(editor_ctx_t *ctx, char *filename) {
+void syntax_select_for_filename(editor_ctx_t *ctx, const char *filename) {
+    if (!filename) return;   /* Unnamed buffer: no syntax to select. */
+
     for (unsigned int j = 0; j < HLDB_ENTRIES; j++) {
         struct t_editor_syntax *s = HLDB+j;
         if (!s->filematch) continue;

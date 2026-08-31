@@ -77,6 +77,7 @@ static int build_row_segments(editor_ctx_t *ctx, t_erow *row, int row_idx,
 /* Deep copy row view with owned segment data */
 static int copy_row_view(EditorRowView *dest, editor_ctx_t *ctx, int y,
                          int gutter_width, int text_cols) {
+    (void)gutter_width;
     int filerow = ctx->view.rowoff + y;
     dest->is_empty = (filerow >= ctx->model.numrows);
     dest->row_num = dest->is_empty ? 0 : filerow + 1;
@@ -246,7 +247,9 @@ int editor_session_handle_event(EditorSession *session, const EditorEvent *event
 
     /* Handle resize event */
     if (event->type == EVENT_RESIZE) {
-        session->ctx.view.screenrows = event->data.resize.rows;
+        /* Reserve the status/message rows, matching modal_process_event. */
+        session->ctx.view.screenrows = event->data.resize.rows - STATUS_ROWS;
+        if (session->ctx.view.screenrows < 1) session->ctx.view.screenrows = 1;
         session->ctx.view.screencols = event->data.resize.cols;
         return 0;
     }
@@ -394,7 +397,7 @@ EditorViewModel *editor_session_snapshot(EditorSession *session) {
     } else {
         int cx = 1;
         int filerow = ctx->view.rowoff + ctx->view.cy;
-        t_erow *row = (filerow >= ctx->model.numrows) ? NULL : &ctx->model.row[filerow];
+        t_erow *row = (filerow < 0 || filerow >= ctx->model.numrows) ? NULL : &ctx->model.row[filerow];
         if (row) {
             for (int j = ctx->view.coloff; j < (ctx->view.cx + ctx->view.coloff); j++) {
                 if (j < row->size && row->chars[j] == TAB)

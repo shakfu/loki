@@ -8,6 +8,7 @@
 #ifndef LOKI_INTERNAL_H
 #define LOKI_INTERNAL_H
 
+#include <unistd.h>
 #include <stddef.h>
 #include <time.h>
 #include <signal.h>
@@ -93,6 +94,9 @@ enum KEY_ACTION{
 
 #define KILO_QUERY_LEN 256
 #define STATUS_ROWS 2
+
+/* Ctrl-Q presses required to abandon a modified buffer. */
+#define KILO_QUIT_TIMES 3
 
 #define LUA_REPL_HISTORY_MAX 64
 #define LUA_REPL_LOG_MAX 128
@@ -227,6 +231,7 @@ typedef struct EditorView {
     int cmd_cursor_pos;       /* Cursor position in command */
     int cmd_history_index;    /* Current history position */
     int pending_prefix;       /* Pending prefix key (e.g., CTRL_X for Ctrl-X sequences), 0 if none */
+    int quit_times;           /* Remaining Ctrl-Q presses needed to quit a dirty buffer */
 
     /* Status */
     char statusmsg[80];       /* Status message */
@@ -322,11 +327,27 @@ void editor_insert_char(editor_ctx_t *ctx, int c);
 void editor_insert_newline(editor_ctx_t *ctx);
 void editor_del_char(editor_ctx_t *ctx);
 
-/* Row management (test helpers) */
+/* Row management */
 void editor_insert_row(editor_ctx_t *ctx, int at, char *s, size_t len);
+void editor_del_row(editor_ctx_t *ctx, int at);
+void editor_free_row(t_erow *row);
+void editor_row_insert_char(editor_ctx_t *ctx, t_erow *row, int at, int c);
+void editor_row_del_char(editor_ctx_t *ctx, t_erow *row, int at);
+void editor_row_append_string(editor_ctx_t *ctx, t_erow *row, char *s, size_t len);
+
+/* Write that deliberately ignores failure (terminal escape sequences: there
+ * is nothing useful to do if the terminal has gone away). */
+static inline void write_ignore_result(int fd, const void *buf, size_t n) {
+    ssize_t r = write(fd, buf, n);
+    (void)r;
+}
 
 /* Screen rendering */
 void editor_refresh_screen(editor_ctx_t *ctx);
+
+/* Give the Lua `loki.highlight_row` hook a chance to adjust a row's
+ * highlighting after the built-in highlighter has run. */
+void lua_apply_highlight_row(editor_ctx_t *ctx, t_erow *row, int default_ran);
 
 /* Lua REPL functions */
 void lua_repl_init(t_lua_repl *repl);

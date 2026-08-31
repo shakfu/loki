@@ -80,6 +80,16 @@ extern test_stats_t test_stats;
     } \
 } while(0)
 
+#define ASSERT_PTR_EQ(actual, expected) do { \
+    if ((const void *)(actual) != (const void *)(expected)) { \
+        printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected %p, got %p\n", \
+               __FILE__, __LINE__, (const void *)(expected), (const void *)(actual)); \
+        test_stats.current_test_failed = 1; \
+        test_stats.failed_tests++; \
+        return; \
+    } \
+} while(0)
+
 #define ASSERT_STR_EQ(actual, expected) do { \
     if (strcmp((actual), (expected)) != 0) { \
         printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected \"%s\", got \"%s\"\n", \

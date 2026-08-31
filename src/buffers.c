@@ -9,6 +9,7 @@
 #include "undo.h"
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <stdio.h>
 
 /* Forward declarations */
@@ -104,6 +105,8 @@ int buffers_init(editor_ctx_t *initial_ctx) {
 
     /* Copy display settings */
     first->ctx.view.line_numbers = initial_ctx->view.line_numbers;
+    first->ctx.view.word_wrap = initial_ctx->view.word_wrap;
+    first->ctx.view.mode = initial_ctx->view.mode;
 
     /* Transfer ownership of buffer content from initial_ctx to first buffer.
      * We take ownership of the pointers and NULL them in initial_ctx to prevent
@@ -181,18 +184,28 @@ int buffer_create(const char *filename) {
         memcpy(buf->ctx.view.colors, template_ctx->view.colors, sizeof(buf->ctx.view.colors));
         /* Copy display settings */
         buf->ctx.view.line_numbers = template_ctx->view.line_numbers;
+        buf->ctx.view.word_wrap = template_ctx->view.word_wrap;
     }
 
-    /* Initialize undo system for new buffer */
-    undo_init(&buf->ctx, 1000, 10 * 1024 * 1024);  /* 1000 ops, 10MB limit */
+    /* Note: editor_ctx_init() above already called undo_init() with these
+     * same defaults. Calling it again here leaked the first undo_state. */
 
-    /* Open file if provided */
+    /* Open file if provided. editor_open() returns -1 both for a real error
+     * and for a file that does not exist yet; the latter is a new, empty
+     * buffer bound to that name, which is what an editor should do. */
     if (filename) {
         if (editor_open(&buf->ctx, (char *)filename) != 0) {
-            /* Failed to open file - clean up */
-            editor_ctx_free(&buf->ctx);
-            buf->active = 0;
-            return -1;
+            if (access(filename, F_OK) != 0) {
+                /* File does not exist yet: start an empty buffer bound to
+                 * that name, the way ':e newfile' should behave. */
+                editor_insert_row(&buf->ctx, 0, "", 0);
+                buf->ctx.model.dirty = 0;
+            } else {
+                /* The file exists but could not be loaded (e.g. binary). */
+                editor_ctx_free(&buf->ctx);
+                buf->active = 0;
+                return -1;
+            }
         }
     } else {
         /* Empty buffer - insert one empty row so it displays properly */

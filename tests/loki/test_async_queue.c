@@ -79,7 +79,7 @@ TEST(queue_multiple_timers) {
     ASSERT_EQ(async_queue_poll(queue, &event), 0);
     ASSERT_EQ(event.type, ASYNC_EVENT_TIMER);
     ASSERT_EQ(event.data.timer.timer_id, 2);
-    ASSERT_EQ(event.data.timer.userdata, (void *)0x1234);
+    ASSERT_PTR_EQ(event.data.timer.userdata, (void *)0x1234);
 
     ASSERT_EQ(async_queue_poll(queue, &event), 0);
     ASSERT_EQ(event.type, ASYNC_EVENT_TIMER);
@@ -251,7 +251,7 @@ TEST(handler_registration) {
 
     /* Register custom handler for timer events */
     async_queue_set_handler(queue, ASYNC_EVENT_TIMER, test_handler);
-    ASSERT_EQ((void *)async_queue_get_handler(queue, ASYNC_EVENT_TIMER), (void *)test_handler);
+    ASSERT_PTR_EQ((void *)async_queue_get_handler(queue, ASYNC_EVENT_TIMER), (void *)test_handler);
 
     /* Push and dispatch */
     g_handler_called = 0;

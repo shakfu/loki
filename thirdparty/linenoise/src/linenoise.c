@@ -107,6 +107,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <strings.h>  /* strcasecmp */
 #include <ctype.h>
 #include <stdint.h>
 

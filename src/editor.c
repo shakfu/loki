@@ -77,30 +77,6 @@ void editor_update_repl_layout(editor_ctx_t *ctx) {
     }
 }
 
-/* Toggle the Lua REPL focus */
-static void exec_lua_command(editor_ctx_t *ctx, int fd) {
-    (void)fd;
-    if (!ctx || !ctx_L(ctx) || !ctx_repl(ctx)) {
-        editor_set_status_msg(ctx, "Lua not available");
-        return;
-    }
-    t_lua_repl *repl = ctx_repl(ctx);
-    int was_active = repl->active;
-    repl->active = !repl->active;
-    editor_update_repl_layout(ctx);
-    if (repl->active) {
-        repl->history_index = -1;
-        editor_set_status_msg(ctx,
-            "Lua REPL: Enter runs, ESC exits, Up/Down history, type 'help'");
-        if (repl->log_len == 0) {
-            lua_repl_append_log(ctx, "Type 'help' for built-in commands");
-        }
-    } else {
-        if (was_active) {
-            editor_set_status_msg(ctx, "Lua REPL closed");
-        }
-    }
-}
 
 /* Apply Lua-based highlighting spans to a row */
 static int lua_apply_span_table(editor_ctx_t *ctx, t_erow *row, int table_index) {
@@ -180,20 +156,29 @@ static int lua_apply_span_table(editor_ctx_t *ctx, t_erow *row, int table_index)
 }
 
 /* Apply Lua custom highlighting to a row */
-static void lua_apply_highlight_row(editor_ctx_t *ctx, t_erow *row, int default_ran) {
+void lua_apply_highlight_row(editor_ctx_t *ctx, t_erow *row, int default_ran) {
     if (!ctx || !ctx_L(ctx) || row == NULL || row->render == NULL) return;
+
+    /* The hook runs Lua, which can touch the buffer and re-enter the
+     * highlighter. Never recurse into the hook itself. */
+    static int in_hook = 0;
+    if (in_hook) return;
+    in_hook = 1;
+
     lua_State *L = ctx_L(ctx);
     int top = lua_gettop(L);
 
     lua_getglobal(L, "loki");
     if (!lua_istable(L, -1)) {
         lua_settop(L, top);
+        in_hook = 0;
         return;
     }
 
     lua_getfield(L, -1, "highlight_row");
     if (!lua_isfunction(L, -1)) {
         lua_settop(L, top);
+        in_hook = 0;
         return;
     }
 
@@ -211,11 +196,13 @@ static void lua_apply_highlight_row(editor_ctx_t *ctx, t_erow *row, int default_
         const char *err = lua_tostring(L, -1);
         editor_set_status_msg(ctx, "Lua highlight error: %s", err ? err : "unknown");
         lua_settop(L, top);
+        in_hook = 0;
         return;
     }
 
     if (!lua_istable(L, -1)) {
         lua_settop(L, top);
+        in_hook = 0;
         return;
     }
 
@@ -248,6 +235,7 @@ static void lua_apply_highlight_row(editor_ctx_t *ctx, t_erow *row, int default_
     }
 
     lua_settop(L, top);
+    in_hook = 0;
 }
 
 /* ======================== Main Editor Function =========================== */

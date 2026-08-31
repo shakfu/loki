@@ -24,7 +24,7 @@ static void setup_test_dir(void) {
 
 /* Teardown: Clean up test files */
 static void cleanup_test_files(void) {
-    system("rm -rf " TEST_FILE_DIR);
+    (void)!system("rm -rf " TEST_FILE_DIR);
 }
 
 /* Helper: Create a test file with given content */
@@ -266,8 +266,38 @@ TEST(editor_open_handles_long_lines) {
     cleanup_test_files();
 }
 
+
+/* Opening a second file must replace the buffer, not append to it.
+ * Regression: ':e other' used to leave both files' lines in the buffer and
+ * then clear the dirty flag, marking the mixture as saved. */
+TEST(editor_open_replaces_existing_buffer) {
+    setup_test_dir();
+    create_test_file("first.txt", "AAA\nBBB\n");
+    create_test_file("second.txt", "CCC\n");
+
+    editor_ctx_t ctx;
+    editor_ctx_init(&ctx);
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/first.txt", TEST_FILE_DIR);
+    ASSERT_EQ(editor_open(&ctx, path), 0);
+    ASSERT_EQ(ctx.model.numrows, 2);
+
+    snprintf(path, sizeof(path), "%s/second.txt", TEST_FILE_DIR);
+    ASSERT_EQ(editor_open(&ctx, path), 0);
+
+    ASSERT_EQ(ctx.model.numrows, 1);
+    ASSERT_STR_EQ(ctx.model.row[0].chars, "CCC");
+    ASSERT_EQ(ctx.model.row[0].idx, 0);
+    ASSERT_EQ(ctx.model.dirty, 0);
+
+    editor_ctx_free(&ctx);
+    cleanup_test_files();
+}
+
 BEGIN_TEST_SUITE("File I/O Integration")
     RUN_TEST(editor_open_loads_simple_file);
+    RUN_TEST(editor_open_replaces_existing_buffer);
     RUN_TEST(editor_open_handles_crlf);
     RUN_TEST(editor_open_rejects_binary_file);
     RUN_TEST(editor_open_handles_empty_file);

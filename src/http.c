@@ -5,6 +5,7 @@
 
 #include "http.h"
 #include "internal.h"
+#include "loki/lua.h"
 #include <lua.h>
 #include <lauxlib.h>
 #include <curl/curl.h>
@@ -13,6 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <strings.h>  /* strcasecmp, strncasecmp */
 
 /* Response data structure */
 typedef struct {
@@ -140,6 +142,92 @@ void loki_http_cleanup(void) {
     }
 }
 
+/* Reject a header that could inject extra headers or confuse the parser. */
+int loki_http_validate_header(const char *header, char *error_buf, size_t error_buf_size) {
+    if (!header) {
+        if (error_buf) snprintf(error_buf, error_buf_size, "Header is not a string");
+        return 0;
+    }
+
+    size_t len = strlen(header);
+    if (len == 0) {
+        if (error_buf) snprintf(error_buf, error_buf_size, "Header is empty");
+        return 0;
+    }
+    if (len > LOKI_HTTP_MAX_HEADER_SIZE) {
+        if (error_buf) snprintf(error_buf, error_buf_size,
+                                "Header too long (max %d)", LOKI_HTTP_MAX_HEADER_SIZE);
+        return 0;
+    }
+
+    /* CR/LF would terminate the header and start another one; other control
+     * characters are not valid in a field value either. */
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)header[i];
+        if (c == '\r' || c == '\n' || c < 32 || c == 127) {
+            if (error_buf) snprintf(error_buf, error_buf_size,
+                                    "Header contains control characters");
+            return 0;
+        }
+    }
+
+    /* Must look like "Name: value" with a non-empty, token-only name. */
+    const char *colon = strchr(header, ':');
+    if (!colon || colon == header) {
+        if (error_buf) snprintf(error_buf, error_buf_size,
+                                "Header must be in 'Name: value' form");
+        return 0;
+    }
+    for (const char *q = header; q < colon; q++) {
+        unsigned char c = (unsigned char)*q;
+        if (!isalnum(c) && c != '-' && c != '_') {
+            if (error_buf) snprintf(error_buf, error_buf_size,
+                                    "Header name contains invalid characters");
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+/* Is this host one that should never be reachable from user script?
+ * Blocks loopback, link-local (including the cloud metadata address) and the
+ * RFC1918 ranges, so a request cannot be aimed at the local network. */
+static int host_is_internal(const char *host, size_t hostlen) {
+    char buf[256];
+    if (hostlen == 0 || hostlen >= sizeof(buf)) return 0;
+    memcpy(buf, host, hostlen);
+    buf[hostlen] = '\0';
+
+    /* Strip an IPv6 bracket pair. */
+    char *h = buf;
+    if (h[0] == '[') {
+        h++;
+        char *close = strchr(h, ']');
+        if (close) *close = '\0';
+    }
+
+    if (strcasecmp(h, "localhost") == 0) return 1;
+    if (strcmp(h, "::1") == 0 || strcmp(h, "::") == 0) return 1;
+    if (strncasecmp(h, "fe80:", 5) == 0) return 1;   /* IPv6 link-local */
+    if (strncasecmp(h, "fc", 2) == 0 || strncasecmp(h, "fd", 2) == 0) {
+        if (strchr(h, ':')) return 1;                /* IPv6 unique-local */
+    }
+
+    unsigned int a, b, c, d;
+    if (sscanf(h, "%u.%u.%u.%u", &a, &b, &c, &d) == 4 &&
+        a < 256 && b < 256 && c < 256 && d < 256) {
+        if (a == 127) return 1;                      /* loopback */
+        if (a == 10) return 1;                       /* RFC1918 */
+        if (a == 172 && b >= 16 && b <= 31) return 1;
+        if (a == 192 && b == 168) return 1;
+        if (a == 169 && b == 254) return 1;          /* link-local / metadata */
+        if (a == 0) return 1;
+    }
+
+    return 0;
+}
+
 int loki_http_validate_url(const char *url, char *error_buf, size_t error_buf_size) {
     if (!url || url[0] == '\0') {
         if (error_buf) snprintf(error_buf, error_buf_size, "URL is empty");
@@ -164,6 +252,31 @@ int loki_http_validate_url(const char *url, char *error_buf, size_t error_buf_si
         unsigned char c = (unsigned char)url[i];
         if (c < 32 || c == 127) {
             if (error_buf) snprintf(error_buf, error_buf_size, "URL contains invalid characters");
+            return 0;
+        }
+    }
+
+    /* Reject internal hosts unless explicitly allowed. */
+    if (!getenv("LOKI_HTTP_ALLOW_INTERNAL")) {
+        const char *host = strstr(url, "://");
+        host = host ? host + 3 : url;
+        const char *at = strchr(host, '@');       /* skip userinfo */
+        size_t authlen = strcspn(host, "/?#");
+        if (at && (size_t)(at - host) < authlen) {
+            host = at + 1;
+            authlen = strcspn(host, "/?#");
+        }
+        size_t hostlen = authlen;
+        if (host[0] == '[') {                     /* IPv6 literal */
+            const char *close = memchr(host, ']', authlen);
+            if (close) hostlen = (size_t)(close - host) + 1;
+        } else {
+            const char *colon = memchr(host, ':', authlen);
+            if (colon) hostlen = (size_t)(colon - host);
+        }
+        if (host_is_internal(host, hostlen)) {
+            if (error_buf) snprintf(error_buf, error_buf_size,
+                                    "URL points at an internal address");
             return 0;
         }
     }
@@ -258,6 +371,15 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
     curl_easy_setopt(req->easy_handle, CURLOPT_TIMEOUT, (long)LOKI_HTTP_TIMEOUT);
     curl_easy_setopt(req->easy_handle, CURLOPT_CONNECTTIMEOUT, (long)LOKI_HTTP_CONNECT_TIMEOUT);
     curl_easy_setopt(req->easy_handle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(req->easy_handle, CURLOPT_MAXREDIRS,
+                     (long)LOKI_HTTP_MAX_REDIRECTS);
+    /* Without this a redirect can hop to file://, gopher://, etc. */
+#if LIBCURL_VERSION_NUM >= 0x075500  /* 7.85.0 */
+    curl_easy_setopt(req->easy_handle, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(req->easy_handle, CURLOPT_REDIR_PROTOCOLS,
+                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
 
     /* SSL/TLS settings */
     curl_easy_setopt(req->easy_handle, CURLOPT_SSL_VERIFYPEER, 1L);
@@ -268,8 +390,9 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
         curl_easy_setopt(req->easy_handle, CURLOPT_CAINFO, ca_bundle);
     }
 
-    /* Debug mode */
-    if (getenv("LOKI_DEBUG")) {
+    /* Debug mode. LOKI_DEBUG alone must not dump request headers: curl's
+     * verbose output includes Authorization. Require an explicit opt-in. */
+    if (getenv("LOKI_DEBUG") && getenv("LOKI_HTTP_TRACE_INSECURE")) {
         curl_easy_setopt(req->easy_handle, CURLOPT_VERBOSE, 1L);
     }
 
@@ -277,8 +400,18 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
     if (method && strcmp(method, "POST") == 0) {
         curl_easy_setopt(req->easy_handle, CURLOPT_POST, 1L);
         if (body) {
-            curl_easy_setopt(req->easy_handle, CURLOPT_POSTFIELDS, body);
+            /* The API takes a NUL-terminated body, so embedded NULs are not
+             * representable here; set the size explicitly all the same. */
+            size_t body_len = strlen(body);
+            curl_easy_setopt(req->easy_handle, CURLOPT_POSTFIELDSIZE,
+                             (long)body_len);
+            /* COPYPOSTFIELDS (not POSTFIELDS): curl takes its own copy, so the
+             * buffer stays valid for the whole async transfer even after the
+             * caller's string is gone. */
+            curl_easy_setopt(req->easy_handle, CURLOPT_COPYPOSTFIELDS, body);
         }
+    } else if (method && strcmp(method, "GET") != 0) {
+        curl_easy_setopt(req->easy_handle, CURLOPT_CUSTOMREQUEST, method);
     }
 
     /* Set headers */
@@ -286,12 +419,23 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
     if (headers && num_headers > 0) {
         for (int i = 0; i < num_headers; i++) {
             req->header_list = curl_slist_append(req->header_list, headers[i]);
+            if (!req->header_list) break;
         }
         curl_easy_setopt(req->easy_handle, CURLOPT_HTTPHEADER, req->header_list);
     }
 
     /* Add to multi handle */
-    curl_multi_add_handle(req->multi_handle, req->easy_handle);
+    if (curl_multi_add_handle(req->multi_handle, req->easy_handle) != CURLM_OK) {
+        /* Otherwise the request would sit in pending_requests[] forever. */
+        curl_slist_free_all(req->header_list);
+        curl_multi_cleanup(req->multi_handle);
+        curl_easy_cleanup(req->easy_handle);
+        free(req->response.data);
+        free(req->lua_callback);
+        free(req);
+        if (ctx) editor_set_status_msg(ctx, "HTTP request failed to start");
+        return -1;
+    }
 
     /* Store request */
     pending_requests[slot] = req;
@@ -412,6 +556,10 @@ int lua_loki_async_http(lua_State *L) {
         return 1;
     }
 
+    /* Check the callback before allocating anything: luaL_checkstring
+     * longjmps on a bad argument, which would leak the headers array. */
+    const char *callback = luaL_checkstring(L, 5);
+
     /* Parse headers table */
     const char **headers = NULL;
     int num_headers = 0;
@@ -424,34 +572,60 @@ int lua_loki_async_http(lua_State *L) {
             lua_pop(L, 1);
         }
 
+        if (num_headers > LOKI_HTTP_MAX_HEADERS) {
+            lua_pushnil(L);
+            return 1;
+        }
+
         if (num_headers > 0) {
             headers = malloc(sizeof(char*) * num_headers);
             if (!headers) {
                 return luaL_error(L, "Out of memory");
             }
             int i = 0;
+            size_t total = 0;
+            int bad = 0;
             lua_pushnil(L);
             while (lua_next(L, 4) != 0) {
-                const char *header_str = strdup(lua_tostring(L, -1));
+                /* lua_tostring returns NULL for a non-string value; strdup(NULL)
+                 * is undefined and used to crash here. */
+                const char *value = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+                char hdr_err[128];
+                if (!loki_http_validate_header(value, hdr_err, sizeof(hdr_err))) {
+                    bad = 1;
+                    lua_pop(L, 2);  /* value + key: stop iterating */
+                    break;
+                }
+                total += strlen(value);
+                if (total > LOKI_HTTP_MAX_HEADERS_TOTAL) {
+                    bad = 1;
+                    lua_pop(L, 2);
+                    break;
+                }
+                char *header_str = strdup(value);
                 if (!header_str) {
-                    for (int j = 0; j < i; j++) {
-                        free((void*)headers[j]);
-                    }
-                    free(headers);
-                    return luaL_error(L, "Out of memory");
+                    bad = 1;
+                    lua_pop(L, 2);
+                    break;
                 }
                 headers[i++] = header_str;
                 lua_pop(L, 1);
             }
+            num_headers = i;
+            if (bad) {
+                for (int j = 0; j < i; j++) {
+                    free((void*)headers[j]);
+                }
+                free(headers);
+                lua_pushnil(L);
+                return 1;
+            }
         }
     }
 
-    const char *callback = luaL_checkstring(L, 5);
-
-    /* Get editor context from Lua registry */
-    lua_getfield(L, LUA_REGISTRYINDEX, "loki_ctx");
-    editor_ctx_t *ctx = lua_touserdata(L, -1);
-    lua_pop(L, 1);
+    /* Editor context. The registry key "loki_ctx" was never set by anything,
+     * so ctx was always NULL and every status message here was dropped. */
+    editor_ctx_t *ctx = loki_lua_get_editor_context(L);
 
     /* Start request */
     int req_id = loki_http_request(ctx, url, method, body, headers, num_headers, callback);

@@ -54,7 +54,6 @@
 #endif
 
 /* Number of times CTRL-Q must be pressed before actually quitting */
-#define KILO_QUIT_TIMES 3
 
 /* Helper: check if a filename has .csd extension */
 static int is_csd_file(const char *filename) {
@@ -65,13 +64,6 @@ static int is_csd_file(const char *filename) {
 }
 
 /* Helper: check if a filename has .joy extension */
-static int is_joy_file(const char *filename) {
-    if (!filename) return 0;
-    size_t len = strlen(filename);
-    if (len < 4) return 0;
-    return strcmp(filename + len - 4, ".joy") == 0;
-}
-
 /* Try to dispatch a keypress to a Lua keymap callback.
  * Checks _loki_keymaps.{mode}[keycode] for a registered function.
  * Returns 1 if handled by Lua, 0 if not (fall through to built-in). */
@@ -113,6 +105,31 @@ static int try_lua_keymap(editor_ctx_t *ctx, const char *mode, int key) {
     return 1;  /* Handled by Lua */
 }
 
+/* Dispatch a normal-mode key to the Lua command registry via the
+ * loki_process_normal_key(key) global. Returns 1 if Lua handled the key. */
+static int try_lua_normal_command(editor_ctx_t *ctx, int key) {
+    lua_State *L = ctx_L(ctx);
+    if (!L) return 0;
+
+    lua_getglobal(L, "loki_process_normal_key");
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 1);
+        return 0;
+    }
+
+    lua_pushinteger(L, key);
+    if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+        const char *err = lua_tostring(L, -1);
+        editor_set_status_msg(ctx, "Lua error: %s", err ? err : "(no message)");
+        lua_pop(L, 1);
+        return 0;
+    }
+
+    int handled = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return handled;
+}
+
 /* Helper: Check if a line is empty (blank or whitespace only) */
 static int is_empty_line(editor_ctx_t *ctx, int row) {
     if (row < 0 || row >= ctx->model.numrows) return 1;
@@ -140,8 +157,9 @@ static void move_to_next_empty_line(editor_ctx_t *ctx) {
         /* Found an empty line - this is where we stop */
         filerow = row;
     } else {
-        /* No empty line found, go to end of file */
-        filerow = ctx->model.numrows - 1;
+        /* No empty line found, go to end of file. Clamp: an empty buffer has
+         * numrows == 0, and a negative filerow poisons rowoff/cy. */
+        filerow = ctx->model.numrows > 0 ? ctx->model.numrows - 1 : 0;
     }
 
     /* Update cursor position */
@@ -292,6 +310,11 @@ static void process_normal_mode(editor_ctx_t *ctx, int fd, int c) {
         return;  /* Handled by Lua callback */
     }
 
+    /* Then commands registered via modal.register_command(). */
+    if (try_lua_normal_command(ctx, c)) {
+        return;  /* Handled by Lua callback */
+    }
+
     switch(c) {
         case 'h': editor_move_cursor(ctx, ARROW_LEFT); break;
         case 'j': editor_move_cursor(ctx, ARROW_DOWN); break;
@@ -311,11 +334,20 @@ static void process_normal_mode(editor_ctx_t *ctx, int fd, int c) {
             undo_break_group(ctx);  /* Break undo group on mode change */
             ctx->view.mode = MODE_INSERT;
             break;
-        case 'a':
+        case 'a': {
             undo_break_group(ctx);  /* Break undo group on mode change */
-            editor_move_cursor(ctx, ARROW_RIGHT);
+            /* Step right to append after the cursor, but not past the end of
+             * the line: ARROW_RIGHT wraps to the next row there, which put
+             * the insertion point on the wrong line. */
+            int arow = ctx->view.rowoff + ctx->view.cy;
+            int acol = ctx->view.coloff + ctx->view.cx;
+            if (arow >= 0 && arow < ctx->model.numrows &&
+                acol < ctx->model.row[arow].size) {
+                editor_move_cursor(ctx, ARROW_RIGHT);
+            }
             ctx->view.mode = MODE_INSERT;
             break;
+        }
         case 'o':
             /* Insert line below and enter insert mode */
             if (ctx->model.numrows > 0) {
@@ -722,8 +754,8 @@ static void process_insert_mode(editor_ctx_t *ctx, int fd, int c) {
             /* Start selection if not active */
             if (!ctx->view.sel_active) {
                 ctx->view.sel_active = 1;
-                ctx->view.sel_start_x = ctx->view.cx;
-                ctx->view.sel_start_y = ctx->view.cy;
+                ctx->view.sel_start_x = ctx->view.coloff + ctx->view.cx;
+                ctx->view.sel_start_y = ctx->view.rowoff + ctx->view.cy;
             }
             /* Move cursor */
             if (c == SHIFT_ARROW_UP) editor_move_cursor(ctx, ARROW_UP);
@@ -731,8 +763,8 @@ static void process_insert_mode(editor_ctx_t *ctx, int fd, int c) {
             else if (c == SHIFT_ARROW_LEFT) editor_move_cursor(ctx, ARROW_LEFT);
             else if (c == SHIFT_ARROW_RIGHT) editor_move_cursor(ctx, ARROW_RIGHT);
             /* Update selection end */
-            ctx->view.sel_end_x = ctx->view.cx;
-            ctx->view.sel_end_y = ctx->view.cy;
+            ctx->view.sel_end_x = ctx->view.coloff + ctx->view.cx;
+            ctx->view.sel_end_y = ctx->view.rowoff + ctx->view.cy;
             break;
 
         default:
@@ -838,6 +870,7 @@ static void process_visual_mode(editor_ctx_t *ctx, int fd, int c) {
  */
 void modal_process_keypress(editor_ctx_t *ctx, int fd) {
     int c = terminal_read_key(fd);
+    if (c == -1) return;  /* Input error; nothing to dispatch. */
 
     /* Handle pending Ctrl-X prefix - read second key immediately from terminal */
     if (ctx->view.pending_prefix == CTRL_X) {
@@ -1038,14 +1071,15 @@ void modal_process_event(editor_ctx_t *ctx, const EditorEvent *event) {
     int c = event_to_keycode(event);
     if (c == 0) return;
 
-    /* Static quit counter (must persist across calls) */
-    static int quit_times = KILO_QUIT_TIMES;
+    /* The quit counter lives on the context (ctx->view.quit_times). It used
+     * to be a function-level static, shared by every editor context and never
+     * reset between sessions. */
 
     /* Handle pending Ctrl-X prefix sequence */
     if (ctx->view.pending_prefix == CTRL_X) {
         ctx->view.pending_prefix = 0;  /* Clear prefix */
         if (handle_ctrl_x_command(ctx, c)) {
-            quit_times = KILO_QUIT_TIMES;
+            ctx->view.quit_times = KILO_QUIT_TIMES;
             return;
         }
         /* If not a valid Ctrl-X command, fall through to normal processing */
@@ -1059,10 +1093,10 @@ void modal_process_event(editor_ctx_t *ctx, const EditorEvent *event) {
 
     /* Handle quit globally (works in all modes) */
     if (c == CTRL_Q) {
-        if (ctx->model.dirty && quit_times) {
+        if (ctx->model.dirty && ctx->view.quit_times) {
             editor_set_status_msg(ctx, "WARNING!!! File has unsaved changes. "
-                "Press Ctrl-Q %d more times to quit.", quit_times);
-            quit_times--;
+                "Press Ctrl-Q %d more times to quit.", ctx->view.quit_times);
+            ctx->view.quit_times--;
             return;
         }
         exit(0);
@@ -1078,14 +1112,14 @@ void modal_process_event(editor_ctx_t *ctx, const EditorEvent *event) {
         } else {
             editor_set_status_msg(ctx, "Error: Could not create buffer (max %d buffers)", MAX_BUFFERS);
         }
-        quit_times = KILO_QUIT_TIMES;
+        ctx->view.quit_times = KILO_QUIT_TIMES;
         return;
     }
 
     /* Handle Ctrl-X prefix */
     if (c == CTRL_X) {
         ctx->view.pending_prefix = CTRL_X;
-        quit_times = KILO_QUIT_TIMES;
+        ctx->view.quit_times = KILO_QUIT_TIMES;
         return;
     }
 
@@ -1105,7 +1139,7 @@ void modal_process_event(editor_ctx_t *ctx, const EditorEvent *event) {
             break;
     }
 
-    quit_times = KILO_QUIT_TIMES; /* Reset it to the original value. */
+    ctx->view.quit_times = KILO_QUIT_TIMES; /* Reset it to the original value. */
 }
 
 /* ============================================================================

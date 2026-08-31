@@ -17,6 +17,134 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Test suite crashed on 64-bit Linux (13 of 17 tests)**: POSIX feature-test macros were effectively absent project-wide
+  - **Problem**: `CMAKE_C_STANDARD 99` with `CMAKE_C_EXTENSIONS OFF` yields strict `-std=c99`, under which glibc hides `strdup`, `strndup` and `strcasecmp`. Every call site got an implicit `int` declaration, truncating returned pointers to 32 bits on x86-64
+  - **Why the previous fix did not work**: `src/core.c` defined `_POSIX_C_SOURCE` on line 15, *after* `#include "loki.h"` on line 1. A feature-test macro after the first system header has no effect, so the guard (and its `#ifdef __linux__` wrapper) was dead code
+  - **Verified**: `gdb` showed `editor_insert_row()` receiving `s=0x55a55992`, a truncated `0x555555a55992`. The 11 failing test binaries were exactly those containing an implicit `strdup`
+  - **Solution**: `add_compile_definitions(_POSIX_C_SOURCE=200809L)` in `CMakeLists.txt`, applying to the library, the `loki` binary and the tests. Removed the ineffective per-file definitions; added `<strings.h>` where `strcasecmp` is used
+  - **Files Modified**: `CMakeLists.txt`, `src/core.c`, `src/async_queue.c`, `src/syntax.c`, `src/http.c`, `thirdparty/linenoise/src/linenoise.c`
+
+- **Undo and redo of line operations destroyed buffer content**: all four line paths were wrong
+  - Undo of Enter mid-line deleted the tail row without rejoining it — `"hello world"` came back as `"hello"`
+  - Undo of Enter at column 0 deleted the row holding the text instead of the blank row inserted above it
+  - Undo of a backspace line-merge re-inserted the tail without truncating the head, duplicating the merged text
+  - Redo of a merge dropped the merged text entirely, and redo of a split failed to truncate the head
+  - **Solution**: undo of `UNDO_INSERT_LINE` now joins row+1 back onto row (covering the mid-line, column-0 and end-of-buffer cases uniformly); undo of `UNDO_DELETE_LINE` splits at the recorded join column; both redo paths replay the original operation faithfully
+  - **Files Modified**: `src/undo.c`
+
+- **Heap-buffer-overflow on every character deletion** — `src/core.c`: `editor_row_del_char()` moved `size - at + 1` bytes, reading one byte past the NUL terminator. Found by AddressSanitizer; not previously reported
+
+- **`editor_insert_row()` over-read its source**: it copied `len + 1` bytes, silently requiring `s[len] == '\0'`. True for its only caller, so it never manifested, but it corrupted rows as soon as a substring was passed. Now copies `len` bytes and terminates the row itself
+
+- **Double free when a line is deleted down to empty**: `realloc(ptr, 0)` frees the pointer and returns `NULL`, and both `syntax_update_row()` and `editor_update_syntax_markdown()` treated that as an allocation failure, returning with `row->hl` dangling. Both now handle `rsize == 0` explicitly (`src/syntax.c`, `src/languages.c`)
+
+- **`editor_del_row()` renumbered rows upward**: rows after the deleted one had `idx` incremented rather than decremented, corrupting multi-line comment propagation, the Lua `row.idx` API, and producing out-of-bounds `row[idx-1]` reads
+
+- **Editor exited itself after ~100 seconds idle** — `src/terminal.c`: raw mode sets `VMIN=0`/`VTIME=1`, so `read()` returns 0 on every 100 ms timeout. A retry counter treated 1000 of those normal idle timeouts as a closed stdin and called `exit(0)`
+
+- **ESC-sequence parser swallowed following keystrokes**: an unrecognised sequence with a recognised prefix (`ESC[Z`, `ESC[1~`, Ctrl-arrows, most CSI-u) fell through to `break` and looped with `c` still `ESC`, consuming two more bytes. Unrecognised sequences now return a bare `ESC`. Sequence reads are also `EINTR`-safe, so a signal can no longer leave `seq[]` uninitialised
+
+- **`}` on an empty file caused a heap underflow**: paragraph motion set `rowoff = -1`, after which any edit indexed `row[-1]`. The motion now clamps, and every `filerow` guard rejects negative indices (the guards only checked `>= numrows`)
+
+- **Editor hung on an empty buffer in a narrow terminal**: the welcome-message padding went negative and `while (padding--)` decremented forever, appending until `realloc` failed
+
+- **Visual-mode deletion could not be undone**: `delete_selection()` called the non-recording row primitives directly, despite a comment claiming otherwise. Added a `UNDO_DELETE_BLOCK` operation that records the deleted range as a single entry, so a large selection does not flood the undo ring
+  - Also fixed the reported deletion count, which included the end row's tail that is actually preserved
+
+- **Buffer overflow in `get_selection_text()`**: the row separator was appended without a capacity check, overflowing on a selection spanning more than 1024 empty lines
+
+- **Screen and file coordinates were mixed up in six places**: `view.cx`/`view.cy` are screen-relative, but were used as file positions in `indent_apply()`, `indent_electric_char()` (which could dedent away non-whitespace), `cmd_substitute()`, `cmd_goto()` (`:goto N` landed on the wrong line whenever it scrolled), shift-arrow selection anchors, and `loki.stream_text()` (which set `cy = -1` on an empty buffer)
+
+- **`:e <file>` appended to the current buffer**: `editor_open()` never cleared the existing rows, then set `dirty = 0` — silently marking a mixture of two files as saved, leaking the old rows, and leaving undo entries pointing at stale row indices
+
+- **`:s/old/new/` truncated long lines**: substitution built into a fixed 4096-byte buffer, silently losing the tail of longer lines. Now sized exactly from a counting pass. It also freed the old text before a `strdup` that could fail, leaving `row->chars == NULL` with a non-zero `row->size`
+
+- **Command output was erased before it could be displayed**: `command_mode_exit()` cleared the status message immediately after `command_execute()` set it, so `3L written`, `Unknown command: ...` and `Pattern not found` were never seen
+
+- **Stack buffer overflow in the REPL completion adapter** — `src/repl.c`: linenoise supplies a buffer of up to 4096 bytes but the adapter copies into a 1024-byte array. `prefix[word_len] = '\0'` was written *outside* the bounds check, so a long unbroken word plus TAB smashed the stack
+
+- **JSON parser crashed on deeply nested input**: `parse_value()` recursed without a depth limit. Verified: ~200k-deep nesting segfaulted before, returns a parse error now. Nesting is capped at 128 levels
+  - Integer parsing accumulated into a signed `int` (undefined on overflow) and now saturates; `"trueX"` and trailing garbage after the top-level value are now rejected rather than silently accepted
+
+- **Double free in `parse_object()`**: when `realloc(keys, ...)` succeeded and `realloc(values, ...)` failed, the cleanup path read and freed the already-freed `keys` block
+
+- **`a` (insert-after) at end of line inserted on the next line**: `ARROW_RIGHT` wraps at the line end, so `a` placed the insertion point at column 0 of the following row
+
+- **Undo memory accounting**: `undo_free()` iterated physical indices `0..count-1` over a circular buffer, leaking every entry's content once the ring had wrapped; the configured `memory_limit` was stored but never enforced
+
+- **`buffer_create()` leaked an undo state per buffer** (~50-60 KB): `editor_ctx_init()` already calls `undo_init()`
+
+- **Use-after-free risk in REPL completion**: `g_completion_editor` was never cleared by `repl_editor_cleanup()`, and `repl_set_completion(ed, NULL, ...)` did not unregister the callback
+
+- **Two divergent context-initialisation contracts**: `init_editor()` left `undo_state`, `indent_config`, command state and `statusmsg` untouched, working only on an already-zeroed struct. It is now a thin wrapper over `editor_ctx_init()`. `buffers_init()`/`buffer_create()` also now carry `word_wrap` across, which previously reverted silently
+
+- **`loki.highlight_row` never ran**: `lua_apply_highlight_row()` had no callers, so Markdown heading/TODO highlighting from `.loki/modules/markdown.lua` silently did nothing. Now invoked from `syntax_update_row()`, with a re-entrancy guard
+
+- **`modal.register_command()` commands were never dispatched**: callbacks were stored in `_loki_commands`, but the `loki_process_normal_key` Lua entry point was never called from C
+
+- **Markdown code-block state did not propagate**: only the open-comment state was pushed to the following row, so editing a fence left every row after it highlighted with a stale language
+
+- **Other fixes**:
+  - `%.20s` applied to a `NULL` filename (undefined behaviour) in the status bar of an unnamed buffer
+  - `syntax_select_for_filename()` crashed on `NULL`, reachable by starting the editor with no file argument
+  - Built-in language count was off by one (counted the `{NULL,...}` terminator)
+  - `command_history_add()` always skipped the first character, storing `"help"` as `"elp"`
+  - `min_args`/`max_args` were unenforceable (`has_args` was a 0/1 flag); `:e a b` tried to open a file literally named `"a b"`
+  - `:goto` used `atoi()`, accepting `:12abc` and overflowing silently
+  - Window-resize clamp was off by one, letting the cursor land on the status line; scroll offsets were never re-clamped
+  - `quit_times` was a function-level `static` shared by every context and never reset between sessions
+  - `EVENT_RESIZE` handling disagreed between `modal.c` and `session.c` over reserving the status rows
+  - `editor_del_char()` re-rendered and re-highlighted the row a second time on every keystroke
+  - `terminal_get_window_size()` queried hard-coded fd 1 instead of the output fd it was given
+  - Multi-line comments rendered as plain text in the `renderer.c` path (`HL_MLCOMMENT` had no case)
+  - Long mixed-highlight lines lost all text past the 256-segment cap instead of just losing styling
+  - Search left `HL_MATCH` applied but unrestorable when the highlight save allocation failed
+  - A Lua ex-command handler returning nothing was reported as having failed
+  - `buffer_create()` refused files that do not exist yet, so a new file could not be opened via the buffer API
+  - `:set opt=value` reported success for options it never applied
+  - `editor_atexit()` never called `buffers_free()`, leaking every buffer's rows and undo history
+  - Async queue: `cleanup()` could destroy the mutex while a producer was mid-push; `async_queue_peek()` handed out a `heap_data` pointer that the next `pop` would free
+
+### Security
+
+- **HTTP request hardening** (`src/http.c`, built only with `-DLOKI_ENABLE_HTTP=ON`)
+  - **Use-after-free in POST bodies**: `CURLOPT_POSTFIELDS` pointed at a Lua-owned string that could be collected while the async transfer was still in flight. Now uses `CURLOPT_COPYPOSTFIELDS` so curl owns the buffer, with an explicit `CURLOPT_POSTFIELDSIZE`
+  - **Header injection**: headers were passed to `curl_slist_append()` with no validation at all. Added `loki_http_validate_header()` rejecting CR/LF and control characters, enforcing `Name: value` form with a token-only name, and applying the per-header (1 KB), total (8 KB) and count (100) limits that `docs/security.md` already described but the code never implemented
+  - **Crash on non-string header values**: `strdup(lua_tostring(L, -1))` passed `NULL` for a value such as `{[1]=true}`
+  - **SSRF**: URL validation checked only the scheme and length. Requests to loopback, link-local (including `169.254.169.254`), RFC1918 and IPv6 unique-local/link-local addresses are now rejected, with `localhost` and userinfo (`user@host`) forms handled. Override with `LOKI_HTTP_ALLOW_INTERNAL`
+  - **Redirects**: `CURLOPT_FOLLOWLOCATION` was set with no protocol restriction or hop limit, so a public URL could redirect to `file://` or an internal host. Now restricted to http/https with `CURLOPT_MAXREDIRS`
+  - **Credential leak**: `LOKI_DEBUG` enabled `CURLOPT_VERBOSE`, printing outgoing request headers including `Authorization: Bearer ...` to stderr. Now requires an explicit `LOKI_HTTP_TRACE_INSECURE` opt-in
+  - **Error paths**: `luaL_checkstring(L, 5)` ran after the headers array was allocated, longjmping past its cleanup; a failed `curl_multi_add_handle()` left the request stranded in `pending_requests[]` forever
+  - **Wrong registry key**: `http.c` read `"loki_ctx"`, which nothing ever set, so the editor context was always `NULL` and every status message was silently dropped. Now uses `loki_lua_get_editor_context()`
+
+### Added
+
+- **Regression tests** for the bugs above (17 → 28 cases); each was confirmed to fail against the unfixed code
+  - `tests/loki/test_undo.c`: line split/merge undo and redo round-trips driven through `editor_insert_newline()`/`editor_del_char()`, and row `idx` consistency after deletion
+  - `tests/loki/test_selection.c`: single-line and multi-line selection delete undo/redo, and exact deletion counts
+  - `tests/loki/test_file_io.c`: `editor_open()` replaces rather than appends to an existing buffer
+- `UNDO_DELETE_BLOCK` undo operation and `undo_record_delete_block()`, for undoing a deleted text range as one entry
+- `loki_http_validate_header()` (`src/http.h`), with the header size/count limits as named constants
+- `ASSERT_PTR_EQ` in the test framework — `ASSERT_EQ` casts both sides to `int`, truncating pointers on 64-bit
+
+### Changed
+
+- **C standard raised from C99 to C11**: `src/async_queue.c` already used `_Atomic`, which produced a `-Wpedantic` warning on every build
+- **The build is now warning-free** with `-Wall -Wextra -pedantic`, across the default, `-DLOKI_ENABLE_HTTP=ON`, and ASan/UBSan configurations, including vendored linenoise
+- **Row API declarations centralised** in `src/internal.h`. `editor_del_row()`, `editor_row_insert_char()`, `editor_row_del_char()` and `editor_row_append_string()` were re-declared by hand in `src/undo.c` and `src/selection.c`, and `editor_row_append_string()` was missing from `undo.c` entirely — the same implicit-declaration hazard as the build bug above
+- **Behaviour changes visible to users**:
+  - `:w my file.txt` is now rejected rather than saving to a file literally named `"my file.txt"`, since `:w` declares `max_args = 1`
+  - `:set opt=value` reports `Unknown option` instead of claiming success
+  - `:w <name>` only rebinds the buffer to the new filename if the write succeeds
+  - `terminal_read_key()` returns `-1` on a read error instead of calling `exit(1)`; callers handle it
+
+### Removed
+
+- Dead code flagged by the compiler: `exec_lua_command()` (`src/editor.c`, superseded by the Ctrl-L handler in `modal.c`), `respond_ok_with()` (`src/jsonrpc.c`), `is_joy_file()` (`src/modal.c`)
+
+
 ### Added
 
 - **Linenoise Integration**: Replaced editline/readline with linenoise fork for REPL line editing
@@ -57,6 +185,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   - **Root Cause**: POSIX types require feature test macros to be defined before including system headers when compiling with `-std=c99` (strict mode without GNU extensions)
   - **Solution**: Added `#define _POSIX_C_SOURCE 200809L` before includes in `src/async_queue.c`, consistent with `src/core.c`
   - **Files Modified**: `src/async_queue.c`
+  - **Superseded**: the macro is now defined once for every target in `CMakeLists.txt`; the per-file definitions have been removed. The `src/core.c` copy this entry was made "consistent with" never took effect, as it sat after the first `#include` — see the entry at the top of Unreleased
 
 ### Added
 

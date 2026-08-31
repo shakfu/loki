@@ -20,6 +20,10 @@
 #define LOKI_HTTP_MAX_RESPONSE_SIZE   (10 * 1024 * 1024)  /* 10MB */
 #define LOKI_HTTP_MAX_URL_LENGTH      2048
 #define LOKI_HTTP_MAX_BODY_SIZE       (5 * 1024 * 1024)   /* 5MB */
+#define LOKI_HTTP_MAX_HEADERS         100
+#define LOKI_HTTP_MAX_HEADER_SIZE     1024
+#define LOKI_HTTP_MAX_HEADERS_TOTAL   8192
+#define LOKI_HTTP_MAX_REDIRECTS       5
 #define LOKI_HTTP_RATE_LIMIT          60      /* requests per minute */
 #define LOKI_HTTP_TIMEOUT             60      /* seconds */
 #define LOKI_HTTP_CONNECT_TIMEOUT     10      /* seconds */
@@ -79,6 +83,9 @@ int loki_http_pending_count(void);
  * @return 1 if valid, 0 if invalid
  */
 int loki_http_validate_url(const char *url, char *error_buf, size_t error_buf_size);
+
+/* Validate a single "Name: value" request header. Returns 1 if acceptable. */
+int loki_http_validate_header(const char *header, char *error_buf, size_t error_buf_size);
 
 /**
  * Lua API: loki.async_http(url, method, body, headers, callback)

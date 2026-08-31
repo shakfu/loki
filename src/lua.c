@@ -144,8 +144,12 @@ static int lua_loki_stream_text(lua_State *L) {
     /* Scroll to bottom */
     if (ctx->model.numrows > ctx->view.screenrows) {
         ctx->view.rowoff = ctx->model.numrows - ctx->view.screenrows;
+    } else {
+        ctx->view.rowoff = 0;
     }
-    ctx->view.cy = ctx->model.numrows - 1;
+    /* cy is screen-relative, and an empty buffer must not leave it negative. */
+    ctx->view.cy = ctx->model.numrows - 1 - ctx->view.rowoff;
+    if (ctx->view.cy < 0) ctx->view.cy = 0;
 
     /* Refresh screen immediately */
     editor_refresh_screen(ctx);
@@ -397,8 +401,9 @@ static int lua_ex_command_handler(editor_ctx_t *ctx, const char *args) {
         return 0;
     }
 
-    /* Get return value (boolean for success/failure) */
-    int result = lua_toboolean(L, -1);
+    /* Get return value. A handler that returns nothing (nil) has succeeded;
+     * only an explicit false means failure. */
+    int result = lua_isnil(L, -1) ? 1 : lua_toboolean(L, -1);
     lua_pop(L, 2);  /* Pop result and table */
     return result;
 }
@@ -499,6 +504,7 @@ static int lua_loki_repl_register(lua_State *L) {
  * ============================================================================ */
 
 int loki_lua_begin_api(lua_State *L, const char *name) {
+    (void)name;  /* Reserved for future per-namespace tables. */
     lua_getglobal(L, "loki");
     if (!lua_istable(L, -1)) {
         lua_pop(L, 1);
