@@ -18,7 +18,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install dependencies (Ubuntu)
       if: runner.os == 'Linux'
@@ -28,13 +28,14 @@ jobs:
           cmake \
           build-essential \
           liblua5.4-dev \
+          libuv1-dev \
           libcurl4-openssl-dev \
           libedit-dev
 
     - name: Install dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install cmake lua curl
+        brew install cmake lua libuv curl
 
     - name: Configure CMake
       run: |
@@ -52,8 +53,7 @@ jobs:
 
     - name: Check executables
       run: |
-        ./build/loki-editor --version
-        ./build/loki-repl --version
+        ./build/loki --version
 
   code-style:
     name: Code Style Check
@@ -61,16 +61,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Check for trailing whitespace
       run: |
-        ! git grep -I --line-number '\s$' -- '*.c' '*.h' || \
+        ! git grep -I --line-number '\s$' -- 'src/*.c' 'src/*.h' 'include/*.h' 'tests/*.c' 'tests/*.h' || \
           (echo "Found trailing whitespace in the lines above" && false)
 
     - name: Check for tabs in source
       run: |
-        ! git grep -I --line-number $'\t' -- '*.c' '*.h' || \
+        ! git grep -I --line-number $'\t' -- 'src/*.c' 'src/*.h' 'include/*.h' 'tests/*.c' 'tests/*.h' || \
           (echo "Found tabs instead of spaces in the lines above" && false)
 
   memory-check:
@@ -79,7 +79,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -88,6 +88,7 @@ jobs:
           cmake \
           build-essential \
           liblua5.4-dev \
+          libuv1-dev \
           libcurl4-openssl-dev \
           libedit-dev \
           valgrind

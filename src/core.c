@@ -1,7 +1,7 @@
 #include "loki.h"
 
-/* 
-loki is based on kilo -- A very simple editor in less than 1000 
+/*
+loki is based on kilo -- A very simple editor in less than 1000
 lines of code (as counted by "cloc"). Does not depend on libcurses,
 directly emits VT100 escapes on the terminal.
 
