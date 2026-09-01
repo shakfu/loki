@@ -40,6 +40,11 @@ struct undo_state {
 /* ======================== Initialization ======================== */
 
 void undo_init(editor_ctx_t *ctx, int capacity, size_t memory_limit) {
+    /* editor_ctx_init() installs a default undo_state, so callers that want
+     * different limits re-init over one that already exists. Overwriting the
+     * pointer leaked it. */
+    undo_free(ctx);
+
     struct undo_state *undo = malloc(sizeof(struct undo_state));
     if (!undo) return;
 
