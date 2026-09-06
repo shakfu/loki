@@ -15,7 +15,7 @@ jobs:
 
     steps:
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install clang-tidy
       run: |
         sudo apt-get install -y clang-tidy-11
@@ -102,7 +102,7 @@ jobs:
        CXXFLAGS: '${{ matrix.san_cflags }} ${{ matrix.asan_cflags }}'
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Build and test
       run: |
          cmake \
@@ -126,7 +126,7 @@ jobs:
             cmake_shared: 'NO'
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: ilammy/msvc-dev-cmd@v1
     - name: Build and test
       run: |
