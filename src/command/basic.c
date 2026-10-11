@@ -6,6 +6,8 @@
 #include "command_impl.h"
 #include "../live_loop.h"
 #include "../lang_bridge.h"
+#include "../trust.h"
+#include "loki.h"
 
 /* :q, :quit - Quit editor */
 int cmd_quit(editor_ctx_t *ctx, const char *args) {
@@ -179,4 +181,15 @@ int cmd_eval(editor_ctx_t *ctx, const char *args) {
             err ? err : "eval failed");
         return 0;
     }
+}
+
+/* :trust - Add the current directory to ~/.loki/trusted */
+int cmd_trust(editor_ctx_t *ctx, const char *args) {
+    (void)args;
+    if (loki_trust_add(".") != 0) {
+        editor_set_status_msg(ctx, "Could not update ~/" LOKI_CONFIG_DIR "/trusted");
+        return 0;
+    }
+    editor_set_status_msg(ctx, "Project trusted; restart to load " LOKI_CONFIG_DIR "/init.lua");
+    return 1;
 }

@@ -64,6 +64,9 @@ int cmd_set(editor_ctx_t *ctx, const char *args);
 /* :stop - Stop all playback and live loops */
 int cmd_stop(editor_ctx_t *ctx, const char *args);
 
+/* :trust - Allow this project's .loki/init.lua to run on next start */
+int cmd_trust(editor_ctx_t *ctx, const char *args);
+
 /* :play - Play entire buffer */
 int cmd_play(editor_ctx_t *ctx, const char *args);
 

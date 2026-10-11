@@ -295,6 +295,19 @@ TEST(editor_open_replaces_existing_buffer) {
     cleanup_test_files();
 }
 
+/* editor_insert_row() copied len + 1 bytes, so a substring argument dragged
+ * in the byte after it. */
+TEST(editor_insert_row_copies_only_len_bytes) {
+    editor_ctx_t ctx;
+    editor_ctx_init(&ctx);
+
+    editor_insert_row(&ctx, 0, "hello world", 5);
+    ASSERT_EQ(ctx.model.row[0].size, 5);
+    ASSERT_STR_EQ(ctx.model.row[0].chars, "hello");
+
+    editor_ctx_free(&ctx);
+}
+
 BEGIN_TEST_SUITE("File I/O Integration")
     RUN_TEST(editor_open_loads_simple_file);
     RUN_TEST(editor_open_replaces_existing_buffer);
@@ -305,4 +318,5 @@ BEGIN_TEST_SUITE("File I/O Integration")
     RUN_TEST(editor_open_handles_no_trailing_newline);
     RUN_TEST(editor_open_handles_nonexistent_file);
     RUN_TEST(editor_open_handles_long_lines);
+    RUN_TEST(editor_insert_row_copies_only_len_bytes);
 END_TEST_SUITE()

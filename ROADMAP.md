@@ -1,226 +1,149 @@
 # Loki Roadmap
 
-This roadmap outlines future development for Loki, organized around the **modular architecture principle**: keep core components focused on essential infrastructure while adding capabilities through feature modules.
+This document separates behavior that exists in the repository today from work still planned. Status below is based on source and build configuration; it does not claim that tests have been run for this snapshot.
 
-## Current Status (v0.5.x)
+## Current State
 
-**Architecture:**
-- Session-based design with opaque `EditorSession` handles
-- Model/View separation (`EditorModel` for document state, `EditorView` for presentation)
-- 19 test suites, 100% pass rate
+Loki is a terminal text editor written in C, with embedded Lua and an optional async HTTP feature. CMake currently requires C11, POSIX support, Lua, libuv, and the vendored cmark and linenoise/Tree-sitter components. HTTP support is optional and enabled with `-DLOKI_ENABLE_HTTP=ON`.
 
-**Core Modules:**
+The codebase includes:
 
-| Module | Description |
-|--------|-------------|
-| `core.c` | Buffer/row management, file I/O |
-| `terminal.c` | Terminal I/O and raw mode |
-| `renderer.c` | Screen rendering (VT100) |
-| `buffers.c` | Multi-buffer management |
-| `modal.c` | Vim-like modal editing |
-| `selection.c` | Text selection, OSC 52 clipboard |
-| `search.c` | Incremental search |
-| `syntax.c` | Syntax highlighting infrastructure |
-| `languages.c` | Language definitions |
-| `command.c` | Ex-style command mode |
-| `undo.c` | Undo/redo with operation grouping |
-| `indent.c` | Smart auto-indentation |
-| `http.c` | Async HTTP with security hardening |
-| `lua.c` | Lua C API bindings |
-| `session.c` | Session management |
-| `editor.c` | Main editor loop |
+- Editor sessions with an opaque public handle, editor model/view structures, and a JSON-RPC stdio harness.
 
-**Recently Completed:**
+- Terminal input and rendering, modal editing, multiple buffers/tabs, selection, line numbers, word wrapping, and basic mouse click positioning.
 
-- Session-based architecture refactor
-- HTTP module restored with security hardening (URL validation, rate limiting, size limits)
-- Async HTTP client for AI/API integration
-- Undo/Redo system with circular buffer
-- Multiple buffers (tabs) with Ctrl-T/Ctrl-X navigation
-- Modal editing with vim-like motions
-- Auto-indentation with electric dedent
-- CommonMark markdown support via cmark
-- Tab completion in Lua REPL
-- Dynamic language registration system
+- Literal incremental search, basic current-line substitution, undo/redo, and automatic indentation with electric dedent.
 
-## Philosophy
+- Lua configuration and editor APIs, a REPL, Lua modules, and dynamic language registration.
 
-**Modular Architecture Principle:**
+- Syntax highlighting through built-in rules and Tree-sitter integrations, plus CommonMark rendering through cmark.
 
-- Core remains focused on essential editor infrastructure
-- Features implemented as separate, composable modules
-- Each module has single, well-defined responsibility
-- Clear API boundaries between components
-- Testable in isolation with zero tolerance for test failures
+- An optional libcurl-based asynchronous HTTP client.
 
-**Module Design Guidelines:**
+The repository has focused unit-test executables configured in CMake. The exact registered test set depends on build options; this roadmap does not assert a pass rate.
 
-- Self-contained with minimal coupling
-- Optional (can be compiled out via CMake if not needed)
-- No direct dependencies on other feature modules
-- Comprehensive error handling and bounds checking
+### Known gaps in existing features
 
----
+- Line numbers are absolute only. Relative numbering, current-line number highlighting, and a command/config toggle are not implemented. `:set` currently supports word wrap only.
 
-## Near-Term Improvements (v0.6.x)
+- Search is literal. It has no regex engine, search history, smart-case option, or complete Vim-style search command set. Substitution applies to the current line and lacks confirmation and whole-file operation.
 
-### 1. Line Numbers Module
+- Mouse handling can position the cursor on a left click, but terminal SGR mouse mode, drag selection, and wheel scrolling are not implemented.
 
-**Impact:** Navigation and reference
-**Complexity:** Low (~120-150 lines)
+- Lua configuration and modules are available, but there is no formal plugin discovery, metadata, lifecycle, or plugin-manager interface.
 
-**Implementation:**
+- HTTP URL validation has known gaps around redirects and alternate numeric IP spellings; see `REVIEW.md`. Treat the internal-host restriction as incomplete until those cases are addressed.
 
-- Optional gutter display with configurable width
-- Relative/absolute number modes (`:set relativenumber`)
-- Highlight current line number
-- Toggle via command or config
+## Planned Work
 
----
+The following items are proposals and are not represented as completed features.
 
-### 2. Search Enhancements
+### Near term
 
-**Impact:** More powerful text finding
-**Complexity:** Medium (~150-200 lines)
+#### Search improvements
 
-**Planned additions:**
+- Add search history and repeat/previous-match commands.
 
-- POSIX regex support via `<regex.h>`
-- Replace functionality: `:%s/find/replace/gc`
-- Search history with up/down arrows
-- Case sensitivity toggle (smart-case)
-- Vim-style search commands: `/`, `?`, `n`, `N`, `*`, `#`
+- Support forward and backward search commands, including `n` and `N` navigation.
 
----
+- Add smart-case behavior and document case handling.
 
-### 3. Bracket Matching Visualization
+- Extend substitution to ranges and the whole buffer, with optional confirmation.
 
-**Impact:** Visual pairing feedback
-**Complexity:** Low (~80-100 lines)
+- Evaluate regex support as a separate enhancement; keep literal search available.
 
-**Implementation:**
+#### Line number settings
 
-- Highlight matching `()`, `{}`, `[]` when cursor on bracket
-- Show match in status if off-screen
-- Support multi-line matching
+- Add relative and hybrid number modes.
 
----
+- Distinguish the current line number visually.
 
-## Mid-Term Improvements (v0.7.x)
+- Expose settings through a command and Lua/config API.
 
-### 4. Split Windows
+#### Bracket matching
 
-**Impact:** View multiple locations/files simultaneously
-**Complexity:** High (~350-450 lines)
+- Highlight matching `()`, `{}`, and `[]` when the cursor is on a bracket.
 
-**Implementation:**
+- Support nested and multi-line pairs, and report off-screen matches in the status area.
 
-- Horizontal/vertical splits (vim-style)
-- Each window has independent viewport into buffer
-- Commands: `:split`, `:vsplit`, `Ctrl-W s/v`
-- Window navigation: `Ctrl-W hjkl`
+#### HTTP request hardening
 
----
+- Ensure redirects cannot reach loopback, private, link-local, or metadata addresses.
 
-### 5. Macro Recording
+- Parse and normalize host addresses robustly, and validate resolved destinations.
 
-**Impact:** Automate repetitive edits
-**Complexity:** Medium (~180-220 lines)
+- Add regression coverage for redirects and alternate numeric address forms.
 
-**Implementation:**
+### Mid term
 
-- Record keystroke sequences: `q{a-z}` to record, `q` to stop
-- Replay: `@{a-z}`, `@@` repeat last
-- Count prefix: `10@a` repeats macro 10 times
-- Up to 26 named registers
+#### Split windows
 
----
+- Add horizontal and vertical splits with independent viewports.
 
-### 6. Git Integration (Phase 1)
+- Add split creation and window-navigation commands.
 
-**Impact:** VCS awareness in editor
-**Complexity:** Medium (~300 lines)
+- Define how windows share buffers and how closing a buffer affects its windows.
 
-**Phase 1 - Read-only awareness:**
+#### Macro recording
 
-- Git status in status line (branch, dirty state)
-- Diff markers in gutter (+/-/~ for add/delete/modify)
-- Jump to next/prev hunk (`]c` / `[c`)
+- Record and replay named keystroke sequences.
 
----
+- Support repeating the last macro and numeric repeat counts.
 
-## Long-Term Vision (v0.8.x+)
+- Define a bounded storage and error policy for macro execution.
 
-### 7. Plugin System Formalization
+#### Git awareness
 
-**Impact:** User extensibility
-**Complexity:** Low (~150 lines additional)
+- Show branch and working-tree state in the status area.
 
-**Current state:** Lua already embedded with extensive API
+- Display line change markers in the gutter.
 
-**Enhancements needed:**
+- Navigate between diff hunks.
 
-- Formalize plugin discovery (scan `.loki/plugins/`)
-- Plugin metadata (`name`, `version`, `author`)
-- Plugin lifecycle hooks (`on_load`, `on_save`, `on_exit`)
-- Plugin manager commands (`:PluginList`, `:PluginEnable`)
+- Keep the first version read-only and avoid running shell commands with interpolated user input.
 
----
+### Longer term
 
-### 8. Mouse Support
+#### Lua plugin conventions
 
-**Complexity:** Low (~100 lines)
+- Define a plugin directory and deterministic loading rules.
 
-- Enable SGR mouse mode
-- Click to position cursor
-- Drag to select text
-- Scroll wheel support
+- Add optional metadata and lifecycle hooks.
 
----
+- Add commands to list and enable/disable plugins if the configuration model needs them.
 
-## Non-Goals
+- Keep ordinary Lua modules usable without a plugin manager.
 
-Things we explicitly **won't** add (preserves minimalist identity):
+#### Mouse interaction
 
-- **GUI version** - Terminal-native is core identity
-- **Complex project management** - Use external tools
-- **Debugger integration** - Use gdb/lldb directly
-- **Built-in terminal** - Use tmux/screen
-- **LSP client** - Too complex for minimalist editor
-- **Tree-sitter** - Overkill for current use cases
-- **Package manager** - Lua plugins are just files
+- Add terminal mouse-mode enable/disable with reliable cleanup.
 
----
+- Support drag selection and wheel scrolling.
 
-## Quality Gates
+- Preserve keyboard operation when mouse reporting is unavailable.
 
-Before adding any feature:
+## Non-goals
 
-1. Does it require core changes? If yes, strong justification needed
-2. Can it be a separate module? If yes, make it optional
-3. Can it be done in Lua? If yes, document as example instead
+The project intends to remain terminal-native and focused on editing. A GUI, built-in terminal, debugger, full project-management environment, and LSP client are outside the current scope. Tree-Sitter is already part of the current build for syntax highlighting, so it is not a non-goal; adding unrelated parser features should still be weighed against dependency and maintenance cost. A package manager is not currently planned; Lua modules should remain easy to load directly.
 
-**All changes must:**
+## Development Principles
 
-- Pass all tests (`make test`)
-- Have no compiler warnings (`-Wall -Wextra -pedantic`)
-- Include documentation updates
+- Keep modules focused and APIs explicit; split functionality into modules when that reduces coupling.
 
----
+- Prefer existing Lua extension points when they can provide a maintainable feature.
 
-## Contributing
+- Make a feature optional at build time when its dependencies or runtime cost justify that choice; current build options do not make every module optional.
 
-**Ways to contribute:**
+- Use the C11 and POSIX environment configured by CMake, and keep compiler warnings enabled (`-Wall -Wextra -pedantic`).
 
-1. Language definitions - Add to `.loki/languages/`
-2. Themes - Add to `.loki/themes/`
-3. Lua modules - Editor utilities, AI integrations
-4. Core modules - New C modules following architecture
-5. Bug fixes and documentation
+- Add focused tests for behavior changes, update user-facing documentation, and run the relevant configured checks before describing a change as verified.
 
-**Module contribution guidelines:**
+## Contribution Areas
 
-- Must be self-contained with clear API
-- Must include unit tests
-- Must be optional (can compile out)
-- Must follow coding style (C99, bounds checking)
+- Language definitions and themes under `.loki/`.
+
+- Lua modules and editor utilities.
+
+- Tests, documentation, and bug fixes.
+
+- Core features that follow the module and API principles above.

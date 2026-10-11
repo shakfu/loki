@@ -6,28 +6,19 @@
 -- It loads modular components and sets up your editing environment.
 --
 -- Loading priority:
---   1. .loki/init.lua (local, project-specific)
+--   1. .loki/init.lua (local, project-specific), only if the project is
+--      trusted: run :trust once, which records it in ~/.loki/trusted
 --   2. ~/.loki/init.lua (global, home directory)
 --
--- If .loki/init.lua exists, the global config is NOT loaded.
+-- If a trusted .loki/init.lua exists, the global config is NOT loaded.
 --
 -- ==============================================================================
 
 -- Detect execution mode: "editor" or "repl"
 MODE = loki.get_lines and "editor" or "repl"
 
--- ==============================================================================
--- Configure Module Path
--- ==============================================================================
-
--- Add .loki/modules to package.path for require()
-package.path = package.path .. ";.loki/modules/?.lua"
-
--- Also add global config path if available
-local home = os.getenv("HOME")
-if home then
-    package.path = package.path .. ";" .. home .. "/.loki/modules/?.lua"
-end
+-- Module path: loki adds ~/.loki/modules, and .loki/modules for a trusted
+-- project, to package.path before this file runs.
 
 -- ==============================================================================
 -- Load Core Modules

@@ -35,6 +35,7 @@
 #include "command.h"  /* Command mode and ex-style commands */
 #include "lang_bridge.h"  /* Language bridge for Lua API registration */
 #include "buffers.h"    /* Buffer management for buffer_get_current() */
+#include "trust.h"      /* Trust list for project-local config */
 #ifdef LOKI_ENABLE_HTTP
 #include "http.h"       /* Async HTTP support */
 #endif
@@ -130,10 +131,15 @@ static int lua_loki_stream_text(lua_State *L) {
 
     const char *text = luaL_checkstring(L, 1);
 
-    /* Move to end of file */
+    /* Move to end of file. cy/cx are screen-relative, so place the last
+     * row on screen first; otherwise a scrolled view inserts past the end. */
     if (ctx->model.numrows > 0) {
-        ctx->view.cy = ctx->model.numrows - 1;
-        ctx->view.cx = ctx->model.row[ctx->view.cy].size;
+        int last = ctx->model.numrows - 1;
+        ctx->view.rowoff = last >= ctx->view.screenrows && ctx->view.screenrows > 0
+                         ? last - ctx->view.screenrows + 1 : 0;
+        ctx->view.cy = last - ctx->view.rowoff;
+        ctx->view.coloff = 0;
+        ctx->view.cx = ctx->model.row[last].size;
     }
 
     /* Insert the text */
@@ -1193,7 +1199,14 @@ static void loki_lua_report(const struct loki_lua_opts *opts, const char *fmt, .
     }
 }
 
-/* Load init.lua: try override, .loki/init.lua (local), then ~/.loki/init.lua */
+/* Directory whose .loki config is the project config ("." by default). */
+static const char *lua_project_root(const struct loki_lua_opts *opts) {
+    return (opts && opts->project_root && opts->project_root[0] != '\0')
+               ? opts->project_root : ".";
+}
+
+/* Load init.lua: try override, .loki/init.lua (local, if the project is
+ * trusted), then ~/.loki/init.lua */
 int loki_lua_load_config(lua_State *L, const struct loki_lua_opts *opts) {
     if (!L) return -1;
 
@@ -1225,7 +1238,10 @@ int loki_lua_load_config(lua_State *L, const struct loki_lua_opts *opts) {
         snprintf(init_path, sizeof(init_path), LOKI_CONFIG_DIR "/init.lua");
     }
 
-    if (access(init_path, R_OK) == 0) {
+    if (access(init_path, R_OK) == 0 && !loki_trust_is_trusted(lua_project_root(opts))) {
+        /* Opening a file must not run code from an untrusted checkout. */
+        loki_lua_report(opts, "Skipped untrusted %s (run :trust to allow)", init_path);
+    } else if (access(init_path, R_OK) == 0) {
         if (luaL_dofile(L, init_path) != LUA_OK) {
             const char *err = lua_tostring(L, -1);
             loki_lua_report(opts, "Lua init error (%s): %s", init_path, err ? err : "unknown");
@@ -1254,40 +1270,51 @@ int loki_lua_load_config(lua_State *L, const struct loki_lua_opts *opts) {
     return loaded ? 0 : 1;
 }
 
+/* Remove relative entries ("./?.lua", "?.so", ...) from package[field], so
+ * require() cannot resolve to files in the current directory. */
+static void lua_drop_relative_entries(lua_State *L, const char *field) {
+    lua_getfield(L, -1, field);
+    const char *cur = lua_tostring(L, -1);
+    if (!cur) { lua_pop(L, 1); return; }
+
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    int first = 1;
+    const char *p = cur;
+    while (*p) {
+        const char *end = strchr(p, ';');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+        if (len > 0 && p[0] == '/') {
+            if (!first) luaL_addchar(&b, ';');
+            luaL_addlstring(&b, p, len);
+            first = 0;
+        }
+        p += len;
+        if (*p == ';') p++;
+    }
+    luaL_pushresult(&b);
+    lua_setfield(L, -3, field);
+    lua_pop(L, 1);  /* old value */
+}
+
 static void loki_lua_extend_path(lua_State *L, const struct loki_lua_opts *opts) {
     if (!L) return;
 
     char addition[4096];
     addition[0] = '\0';
     size_t used = 0;
-    size_t remaining = sizeof(addition);
+    const char *project_root = lua_project_root(opts);
+    int trusted = loki_trust_is_trusted(project_root);
 
-    const char *project_root = (opts && opts->project_root && opts->project_root[0] != '\0')
-                                   ? opts->project_root
-                                   : ".";
-    int wrote = snprintf(addition + used, remaining,
-                         "%s/" LOKI_CONFIG_DIR "/?.lua;%s/" LOKI_CONFIG_DIR "/?/init.lua;",
-                         project_root, project_root);
-    if (wrote > 0 && (size_t)wrote < remaining) {
-        used += (size_t)wrote;
-        remaining -= (size_t)wrote;
-    } else {
-        remaining = remaining > 0 ? 1 : 0;
-        used = sizeof(addition) - remaining;
-    }
-
-    const char *home = getenv("HOME");
-    if (home && home[0] != '\0' && remaining > 1) {
-        wrote = snprintf(addition + used, remaining,
-                         "%s/" LOKI_CONFIG_DIR "/?.lua;%s/" LOKI_CONFIG_DIR "/?/init.lua;",
-                         home, home);
-        if (wrote > 0 && (size_t)wrote < remaining) {
-            used += (size_t)wrote;
-            remaining -= (size_t)wrote;
-        } else {
-            remaining = remaining > 0 ? 1 : 0;
-            used = sizeof(addition) - remaining;
-        }
+    /* Append "<dir>/.loki/?.lua;<dir>/.loki/?/init.lua;<dir>/.loki/modules/?.lua;" */
+    const char *dirs[2] = { trusted ? project_root : NULL, getenv("HOME") };
+    for (int i = 0; i < 2; i++) {
+        if (!dirs[i] || !dirs[i][0]) continue;
+        int wrote = snprintf(addition + used, sizeof(addition) - used,
+                             "%s/" LOKI_CONFIG_DIR "/?.lua;%s/" LOKI_CONFIG_DIR "/?/init.lua;"
+                             "%s/" LOKI_CONFIG_DIR "/modules/?.lua;",
+                             dirs[i], dirs[i], dirs[i]);
+        if (wrote > 0 && (size_t)wrote < sizeof(addition) - used) used += (size_t)wrote;
     }
 
     const char *extra = NULL;
@@ -1299,20 +1326,13 @@ static void loki_lua_extend_path(lua_State *L, const struct loki_lua_opts *opts)
             extra = env_extra;
         }
     }
-    if (extra && remaining > 1) {
-        wrote = snprintf(addition + used, remaining, "%s;", extra);
-        if (wrote > 0 && (size_t)wrote < remaining) {
-            used += (size_t)wrote;
-            remaining -= (size_t)wrote;
-        }
+    if (extra) {
+        int wrote = snprintf(addition + used, sizeof(addition) - used, "%s;", extra);
+        if (wrote > 0 && (size_t)wrote < sizeof(addition) - used) used += (size_t)wrote;
     }
 
-    if (used == 0) {
-        return;
-    }
-
-    if (addition[used - 1] == ';') {
-        addition[used - 1] = '\0';
+    if (used > 0 && addition[used - 1] == ';') {
+        addition[--used] = '\0';
     }
 
     lua_getglobal(L, "package");
@@ -1321,14 +1341,21 @@ static void loki_lua_extend_path(lua_State *L, const struct loki_lua_opts *opts)
         return;
     }
 
-    lua_getfield(L, -1, "path");
-    const char *current = lua_tostring(L, -1);
-    if (!current) current = "";
+    if (!trusted) {
+        lua_drop_relative_entries(L, "path");
+        lua_drop_relative_entries(L, "cpath");
+    }
 
-    lua_pushfstring(L, "%s;%s", current, addition);
-    lua_setfield(L, -3, "path");
+    if (used > 0) {
+        lua_getfield(L, -1, "path");
+        const char *current = lua_tostring(L, -1);
+        if (!current) current = "";
+        lua_pushfstring(L, "%s;%s", current, addition);
+        lua_setfield(L, -3, "path");
+        lua_pop(L, 1); /* pop path */
+    }
 
-    lua_pop(L, 2); /* pop path and package */
+    lua_pop(L, 1); /* pop package */
 }
 
 void loki_lua_install_namespaces(lua_State *L) {
@@ -1464,6 +1491,20 @@ lua_State *loki_lua_bootstrap(editor_ctx_t *ctx, const struct loki_lua_opts *opt
     /* Package library for require() - needed for .psnd modules */
     luaL_requiref(L, LUA_LOADLIBNAME, luaopen_package, 1);
     lua_pop(L, 1);
+
+    /* No native code: package.loadlib and the C searchers load shared
+     * libraries, which would bypass every restriction above. */
+    lua_getglobal(L, "package");
+    lua_pushnil(L);
+    lua_setfield(L, -2, "loadlib");
+    lua_pushliteral(L, "");
+    lua_setfield(L, -2, "cpath");
+    lua_getfield(L, -1, "searchers");   /* preload, Lua, C, all-in-one */
+    lua_pushnil(L);
+    lua_rawseti(L, -2, 4);
+    lua_pushnil(L);
+    lua_rawseti(L, -2, 3);
+    lua_pop(L, 2);
 
     /* Skipped (dangerous):
      * - os: os.execute(), os.remove(), os.rename(), os.exit()

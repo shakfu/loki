@@ -11,6 +11,15 @@
 #include <time.h>
 #include <stdio.h>
 
+#ifdef _WIN32
+static char* strndup(const char* s, size_t n) {
+    size_t len = strnlen(s, n);
+    char* result = (char*)malloc(len + 1);
+    if (result) { memcpy(result, s, len); result[len] = '\0'; }
+    return result;
+}
+#endif
+
 /* Undo grouping heuristics */
 #define UNDO_GROUP_TIMEOUT 2         /* 2 seconds gap = new group */
 #define UNDO_GROUP_MOVEMENT_GAP 2    /* Cursor moved >2 positions = new group */

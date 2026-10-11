@@ -370,7 +370,7 @@ int hl_name_to_code(const char *name);
 int is_separator(int c, char *separators);
 
 /* Terminal and input functions are now in loki_terminal.h */
-void editor_process_keypress(editor_ctx_t *ctx, int fd);
+int editor_process_keypress(editor_ctx_t *ctx, int fd);
 
 /* Cursor movement */
 void editor_move_cursor(editor_ctx_t *ctx, int key);

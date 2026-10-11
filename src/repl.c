@@ -765,7 +765,7 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
                 continue;
             }
 
-            strcpy(ed->buf, ed->history[ed->history_idx]);
+            snprintf(ed->buf, sizeof(ed->buf), "%s", ed->history[ed->history_idx]);
             ed->len = strlen(ed->buf);
             ed->pos = ed->len;
             repl_completion_clear(ed);
@@ -778,7 +778,7 @@ char *repl_readline(editor_ctx_t *syntax_ctx, ReplLineEditor *ed, const char *pr
 
             if (ed->history_idx < ed->history_len - 1) {
                 ed->history_idx++;
-                strcpy(ed->buf, ed->history[ed->history_idx]);
+                snprintf(ed->buf, sizeof(ed->buf), "%s", ed->history[ed->history_idx]);
                 ed->len = strlen(ed->buf);
                 ed->pos = ed->len;
             } else {

@@ -105,8 +105,10 @@ static int try_lua_keymap(editor_ctx_t *ctx, const char *mode, int key) {
     return 1;  /* Handled by Lua */
 }
 
-/* Dispatch a normal-mode key to the Lua command registry via the
- * loki_process_normal_key(key) global. Returns 1 if Lua handled the key. */
+/* Dispatch a normal-mode key to commands registered from Lua. A global
+ * loki_process_normal_key(key) takes precedence; without one, the key is
+ * looked up in loki.register_command()'s _loki_commands table. Returns 1 if
+ * Lua handled the key. */
 static int try_lua_normal_command(editor_ctx_t *ctx, int key) {
     lua_State *L = ctx_L(ctx);
     if (!L) return 0;
@@ -114,7 +116,26 @@ static int try_lua_normal_command(editor_ctx_t *ctx, int key) {
     lua_getglobal(L, "loki_process_normal_key");
     if (!lua_isfunction(L, -1)) {
         lua_pop(L, 1);
-        return 0;
+        if (key < 32 || key > 126) return 0;   /* registry keys are printable */
+
+        lua_getglobal(L, "_loki_commands");
+        if (!lua_istable(L, -1)) {
+            lua_pop(L, 1);
+            return 0;
+        }
+        char name[2] = { (char)key, '\0' };
+        lua_getfield(L, -1, name);
+        if (!lua_isfunction(L, -1)) {
+            lua_pop(L, 2);
+            return 0;
+        }
+        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+            const char *err = lua_tostring(L, -1);
+            editor_set_status_msg(ctx, "Command error: %s", err ? err : "(no message)");
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);  /* _loki_commands */
+        return 1;
     }
 
     lua_pushinteger(L, key);
@@ -868,9 +889,9 @@ static void process_visual_mode(editor_ctx_t *ctx, int fd, int c) {
  *
  * For non-terminal input sources, use modal_process_event() directly.
  */
-void modal_process_keypress(editor_ctx_t *ctx, int fd) {
+int modal_process_keypress(editor_ctx_t *ctx, int fd) {
     int c = terminal_read_key(fd);
-    if (c == -1) return;  /* Input error; nothing to dispatch. */
+    if (c == -1) return -1;  /* Input closed or failed. */
 
     /* Handle pending Ctrl-X prefix - read second key immediately from terminal */
     if (ctx->view.pending_prefix == CTRL_X) {
@@ -878,7 +899,7 @@ void modal_process_keypress(editor_ctx_t *ctx, int fd) {
          * Convert to event and let modal_process_event() handle it. */
         EditorEvent ev = event_from_keycode(c);
         modal_process_event(ctx, &ev);
-        return;
+        return 0;
     }
 
     /* Intercept CTRL_F for interactive find (requires terminal I/O).
@@ -888,13 +909,14 @@ void modal_process_keypress(editor_ctx_t *ctx, int fd) {
         t_lua_repl *repl = ctx_repl(ctx);
         if (!repl || !repl->active) {
             editor_find(ctx, fd);
-            return;
+            return 0;
         }
     }
 
     /* Convert keypress to event and delegate to event handler */
     EditorEvent ev = event_from_keycode(c);
     modal_process_event(ctx, &ev);
+    return 0;
 }
 
 /* ============================================================================
@@ -1001,7 +1023,7 @@ void modal_process_event(editor_ctx_t *ctx, const EditorEvent *event) {
 
         case EVENT_RESIZE:
             /* Update screen dimensions */
-            ctx->view.screenrows = event->data.resize.rows - STATUS_ROWS;
+            ctx->view.screenrows = event->data.resize.rows;  /* text rows */
             ctx->view.screencols = event->data.resize.cols;
             editor_refresh_screen(ctx);
             return;

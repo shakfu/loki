@@ -432,7 +432,8 @@ int loki_editor_main(int argc, char **argv) {
         }
 
         editor_refresh_screen(ctx);
-        editor_process_keypress(ctx, STDIN_FILENO);
+        /* Stop on closed input (e.g. terminal hangup) instead of spinning. */
+        if (editor_process_keypress(ctx, STDIN_FILENO) < 0) break;
     }
 
     return 0;

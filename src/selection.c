@@ -63,6 +63,41 @@ int is_selected(editor_ctx_t *ctx, int row, int col) {
     }
 }
 
+/* Check if a position is within the selection defined by a view.
+ * Used for rendering split panes with independent selection state. */
+int is_selected_view(const EditorView *view, int row, int col) {
+    if (!view || !view->sel_active) return 0;
+
+    int start_y = view->sel_start_y;
+    int start_x = view->sel_start_x;
+    int end_y = view->sel_end_y;
+    int end_x = view->sel_end_x;
+
+    /* Ensure start comes before end */
+    if (start_y > end_y || (start_y == end_y && start_x > end_x)) {
+        int tmp;
+        tmp = start_y; start_y = end_y; end_y = tmp;
+        tmp = start_x; start_x = end_x; end_x = tmp;
+    }
+
+    /* Check if row is in range */
+    if (row < start_y || row > end_y) return 0;
+
+    /* Single line selection */
+    if (start_y == end_y) {
+        return col >= start_x && col < end_x;
+    }
+
+    /* Multi-line selection */
+    if (row == start_y) {
+        return col >= start_x;
+    } else if (row == end_y) {
+        return col < end_x;
+    } else {
+        return 1; /* Entire line selected */
+    }
+}
+
 /* Base64 encode a string for OSC 52 clipboard protocol.
  * Caller must free the returned string.
  * Returns NULL on allocation failure. */
@@ -120,46 +155,9 @@ void copy_selection_to_clipboard(editor_ctx_t *ctx) {
         return;
     }
 
-    /* Ensure start comes before end */
-    int start_y = ctx->view.sel_start_y;
-    int start_x = ctx->view.sel_start_x;
-    int end_y = ctx->view.sel_end_y;
-    int end_x = ctx->view.sel_end_x;
-
-    if (start_y > end_y || (start_y == end_y && start_x > end_x)) {
-        int tmp;
-        tmp = start_y; start_y = end_y; end_y = tmp;
-        tmp = start_x; start_x = end_x; end_x = tmp;
-    }
-
-    /* Build selected text */
-    char *text = NULL;
-    size_t text_len = 0;
-    size_t text_capacity = 1024;
-    text = malloc(text_capacity);
+    char *text = get_selection_text(ctx);
     if (!text) return;
-
-    for (int y = start_y; y <= end_y && y < ctx->model.numrows; y++) {
-        int x_start = (y == start_y) ? start_x : 0;
-        int x_end = (y == end_y) ? end_x : ctx->model.row[y].size;
-        if (x_end > ctx->model.row[y].size) x_end = ctx->model.row[y].size;
-
-        int len = x_end - x_start;
-        if (len > 0) {
-            while (text_len + len + 2 > text_capacity) {
-                text_capacity *= 2;
-                char *new_text = realloc(text, text_capacity);
-                if (!new_text) { free(text); return; }
-                text = new_text;
-            }
-            memcpy(text + text_len, ctx->model.row[y].chars + x_start, len);
-            text_len += len;
-        }
-        if (y < end_y) {
-            text[text_len++] = '\n';
-        }
-    }
-    text[text_len] = '\0';
+    size_t text_len = strlen(text);
 
     /* Copy to clipboard using abstraction */
     int result = clipboard_copy_text(ctx, text, text_len);

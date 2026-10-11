@@ -22,7 +22,7 @@ A lightweight, modular text editor built on antirez's [kilo](https://github.com/
 ### Lua Scripting Engine
 - **Lua/LuaJIT**: Full Lua environment for extensibility
 
-- **Project-local config**: `.loki/init.lua` overrides `~/.loki/init.lua`
+- **Project-local config**: a trusted project's `.loki/init.lua` overrides `~/.loki/init.lua`
 
 - **Interactive console**: Toggle the collapsible Lua REPL with `Ctrl-L` (with syntax highlighting via linenoise)
 
@@ -250,11 +250,13 @@ Loki includes an embedded Lua interpreter for customization and automation.
 
 Loki loads Lua configuration with local override support:
 
-1. `.loki/init.lua` - Project-specific config (current directory)
+1. `.loki/init.lua` - Project-specific config (current directory), only if the project is trusted
 
 2. `~/.loki/init.lua` - Global config (home directory)
 
-If a local `.loki/init.lua` exists, the global config is **not** loaded.
+If a trusted local `.loki/init.lua` exists, the global config is **not** loaded.
+
+Project config runs with full Lua access, so loki skips it until you run `:trust` in that directory. `:trust` records the directory's resolved path in `~/.loki/trusted`; restart loki to load the config. In an untrusted project, `require()` also ignores the project's `.loki/` and relative `package.path` and `package.cpath` entries.
 
 **Quick start:**
 ```bash
@@ -263,6 +265,8 @@ cp -r .loki.example .loki
 
 # Edit to customize
 vim .loki/init.lua
+
+# Then run :trust once inside loki, and restart
 ```
 
 ### Interactive Lua Console

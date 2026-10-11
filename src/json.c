@@ -196,16 +196,11 @@ void json_kv_bool(JsonBuilder *jb, const char *key, int value) {
 
 /* ======================= JSON Parser ======================================= */
 
-/* Maximum object/array nesting. parse_value -> parse_object/parse_array ->
- * parse_value recurses once per level, so without a cap a deeply nested
- * document overflows the C stack. */
-#define JSON_MAX_DEPTH 128
-
 typedef struct {
     const char *json;
     size_t pos;
     size_t len;
-    int depth;
+    int depth;      /* Current container nesting; capped at JSON_MAX_DEPTH */
 } JsonParser;
 
 static void skip_whitespace(JsonParser *p) {
@@ -562,6 +557,11 @@ static JsonValue parse_value(JsonParser *p) {
 }
 
 JsonValue json_parse(const char *json) {
+    if (!json) {
+        JsonValue result = { .type = JSON_ERROR };
+        return result;
+    }
+
     JsonParser p = {
         .json = json,
         .pos = 0,

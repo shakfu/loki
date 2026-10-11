@@ -621,6 +621,26 @@ TEST(delete_selection_reports_exact_count) {
     editor_ctx_free(&ctx);
 }
 
+/* Row separators used to be appended without a capacity check, so a
+ * selection over more than 1024 empty rows overflowed the buffer. */
+TEST(get_selection_text_many_empty_rows) {
+    enum { N = 2000 };
+    const char *lines[N];
+    for (int i = 0; i < N; i++) lines[i] = "";
+    editor_ctx_t ctx;
+    init_multiline_ctx(&ctx, N, lines);
+
+    ctx.view.sel_active = 1;
+    ctx.view.sel_start_y = 0;     ctx.view.sel_start_x = 0;
+    ctx.view.sel_end_y = N - 1;   ctx.view.sel_end_x = 0;
+
+    char *text = get_selection_text(&ctx);
+    ASSERT_NOT_NULL(text);
+    ASSERT_EQ((int)strlen(text), N - 1);
+    free(text);
+    editor_ctx_free(&ctx);
+}
+
 BEGIN_TEST_SUITE("Selection and Clipboard")
     /* is_selected() - single line */
     RUN_TEST(selection_single_line_in_range);
@@ -664,4 +684,5 @@ BEGIN_TEST_SUITE("Selection and Clipboard")
     RUN_TEST(selection_empty_buffer);
     RUN_TEST(selection_single_character);
     RUN_TEST(selection_zero_width);
+    RUN_TEST(get_selection_text_many_empty_rows);
 END_TEST_SUITE()

@@ -1,13 +1,16 @@
-/* loki_terminal.c - Terminal I/O implementation
+/* POSIX terminal implementation
  *
- * Platform-specific terminal operations for POSIX systems.
+ * Platform-specific terminal operations for POSIX systems (macOS, Linux).
  * Uses termios for raw mode, ioctl for window size, and VT100
  * escape sequences for advanced features.
  */
 
+#ifndef _WIN32
+
 #include "terminal.h"
 #include <termios.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <signal.h>
 #include <errno.h>
@@ -137,8 +140,16 @@ static int read_seq_byte(int fd, char *out) {
     }
 }
 
+/* After a 0-byte read: is the input gone (hangup, closed pipe) rather than
+ * idle? An idle raw-mode tty returns 0 on every VTIME timeout; a hung-up one
+ * returns 0 at once, forever, and reports POLLHUP. */
+static int input_closed(int fd) {
+    struct pollfd p = { .fd = fd, .events = POLLIN, .revents = 0 };
+    return poll(&p, 1, 0) > 0 && (p.revents & (POLLHUP | POLLERR | POLLNVAL));
+}
+
 /* Read a key from the terminal put in raw mode, trying to handle
- * escape sequences. */
+ * escape sequences. Returns -1 on a read error or closed input. */
 int terminal_read_key(int fd) {
     int nread;
     char c, seq[6];
@@ -146,7 +157,10 @@ int terminal_read_key(int fd) {
      * timeout. That is the normal idle case on a healthy terminal, not a
      * closed stdin -- just keep waiting. Retry on EINTR. */
     while ((nread = read(fd, &c, 1)) != 1) {
-        if (nread == 0) continue;
+        if (nread == 0) {
+            if (input_closed(fd)) return -1;
+            continue;
+        }
         if (errno == EINTR || errno == EAGAIN) continue;
         return -1;
     }
@@ -352,3 +366,5 @@ void terminal_buffer_append(struct abuf *ab, const char *s, int len) {
 void terminal_buffer_free(struct abuf *ab) {
     free(ab->b);
 }
+
+#endif /* !_WIN32 */

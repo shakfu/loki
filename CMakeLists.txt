@@ -83,6 +83,7 @@ set(LOKI_SOURCES
     src/repl_linenoise.c
     src/treesitter.c
     src/loki_markdown.c
+    src/trust.c
 )
 
 # Optional HTTP support
@@ -201,6 +202,10 @@ if(BUILD_TESTS)
         test_file_io
         test_row_operations
         test_async_queue
+        test_trust
+        test_json
+        test_jsonrpc
+        test_command_handlers
     )
 
     foreach(test_name ${LOKI_TESTS})

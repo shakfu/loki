@@ -20,6 +20,7 @@
 
 #include "command.h"
 #include "internal.h"
+#include "buffers.h"
 #include "command/command_impl.h"
 #include <lua.h>
 
@@ -37,21 +38,22 @@ static int dynamic_command_count = 0;
  */
 static command_def_t builtin_commands[] = {
     /* File operations (file.c) */
-    {"w",      cmd_write,       "Write (save) file",              0, 1},
-    {"write",  cmd_write,       "Write (save) file",              0, 1},
-    {"e",      cmd_edit,        "Edit file",                      1, 1},
-    {"edit",   cmd_edit,        "Edit file",                      1, 1},
+    {"w",      cmd_write,       "Write (save) file",              0, -1},
+    {"write",  cmd_write,       "Write (save) file",              0, -1},
+    {"e",      cmd_edit,        "Edit file",                      1, -1},
+    {"edit",   cmd_edit,        "Edit file",                      1, -1},
 
     /* Basic commands (basic.c) */
     {"q",      cmd_quit,        "Quit editor",                    0, 0},
     {"quit",   cmd_quit,        "Quit editor",                    0, 0},
-    {"wq",     cmd_write_quit,  "Write and quit",                 0, 1},
-    {"x",      cmd_write_quit,  "Write and quit (if modified)",   0, 1},
+    {"wq",     cmd_write_quit,  "Write and quit",                 0, -1},
+    {"x",      cmd_write_quit,  "Write and quit (if modified)",   0, -1},
     {"q!",     cmd_force_quit,  "Quit without saving",            0, 0},
     {"quit!",  cmd_force_quit,  "Quit without saving",            0, 0},
     {"help",   cmd_help,        "Show help",                      0, 1},
     {"h",      cmd_help,        "Show help",                      0, 1},
     {"set",    cmd_set,         "Set option (wrap, etc)",         0, 2},
+    {"trust",  cmd_trust,       "Trust this project's Lua config", 0, 0},
 
     /* Navigation (goto.c) */
     {"goto",   cmd_goto,        "Go to line number",              1, 1},
@@ -342,7 +344,8 @@ void command_mode_handle_key(editor_ctx_t *ctx, int fd, int key) {
             if (ctx->view.cmd_length > 1) {  /* More than just ':' */
                 command_execute(ctx, ctx->view.cmd_buffer);
             }
-            command_mode_exit(ctx);
+            /* Get current context after command execution - buffer may have switched */
+            command_mode_exit(buffer_get_current());
             break;
 
         case BACKSPACE:

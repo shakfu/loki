@@ -22,6 +22,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+### Security
+
+- **Project-local Lua config runs only in trusted directories**: opening a file in a cloned repo used to run its `.loki/init.lua` with full `os` and `io` access. Projects are now trusted with `:trust`, which records the resolved path in `~/.loki/trusted`. In an untrusted project, `require()` also ignores the project's `.loki/` and relative `package.path`/`package.cpath` entries, since a home config could otherwise load `./languages.lua` from the checkout. A trust list keeps per-project config; loading only `~/.loki/init.lua` would have dropped it.
+
+  The bundled `.loki/init.lua` no longer extends `package.path` itself. loki adds `.loki/modules` for trusted projects and `~/.loki/modules` before running it.
+
+- **`LUA_SANDBOX` builds could load native code**: the sandbox kept `package.loadlib` and the C searchers, so `require` of a `.so` bypassed the removed `os`/`io` libraries. Both are now removed and `package.cpath` is empty.
+
+### Added
+
+- **Tests for the code shared with psnd**: `test_json`, `test_jsonrpc` and `test_command_handlers` are ported from psnd. psnd's regression tests for terminal input, selection, indent, commands, buffers, modal keys and session resize are added to the matching loki suites.
+
+- **`make check-sync`**: fails when a generic-core file differs from psnd, the upstream project (`scripts/check-psnd-sync.sh`; `PSND_DIR` defaults to `../psnd`). The file list in the script defines the generic core.
+
+- **`is_selected_view()`** (`src/selection.h`): selection test against an explicit view, used by psnd's split panes.
+
+### Changed
+
+- **`JSON_MAX_DEPTH` is public** (`src/json.h`) and lowered from 128 to 64, matching psnd.
+
+- **`:w`, `:e`, `:wq` and `:x` take the rest of the line** (`max_args` -1), so paths with spaces pass the argument-count check added in 0.5.1.
+
+### Fixed
+
+- **A hung-up terminal could leave the editor spinning**: with SIGHUP ignored, `read()` on a hung-up tty returns 0 at once, forever, which looked like raw mode's 100 ms idle timeout. `terminal_read_key` now checks `poll()` for `POLLHUP` after a 0-byte read and returns -1. `editor_process_keypress` and `modal_process_keypress` now return that -1, and the editor loop and terminal host stop on it.
+
+- **`loki.register_command` callbacks were never called without a Lua dispatcher**: they went into `_loki_commands`, which only `.loki/modules/modal.lua` read. The C hook now dispatches from that table when no `loki_process_normal_key` global is defined.
+
+- **Resize events disagreed on what `rows` meant**: `session.c` subtracted the status rows and the terminal host sent the full height. `EVENT_RESIZE.rows` is now the text area for every host; the terminal host subtracts `STATUS_ROWS` itself. Subtracting in the session would have taken two rows from psnd's web hosts, whose status line is HTML.
+
+- **`json_parse(NULL)` crashed** in `strlen`. It now returns `JSON_ERROR`.
+
+- **REPL history recall copied into the 1024-byte input buffer with `strcpy`**: `repl_add_history` accepts any length.
+
+- **`loki.stream_text` inserted past the end of a scrolled buffer**: the 0.5.1 fix covered the final cursor placement, but the initial move to the last row still set the screen-relative `cy` to a file row.
+
+- **Clipboard copy overflowed on selections over more than 1024 empty rows**: `copy_selection_to_clipboard` duplicated the pre-0.5.1 `get_selection_text` loop. It now calls `get_selection_text`.
+
+- **`command_mode_exit` ran on a stale context** if the command switched buffers. Taken from psnd.
+
 ## [0.5.1]
 
 ### Fixed

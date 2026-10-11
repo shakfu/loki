@@ -1141,9 +1141,9 @@ void editor_move_cursor(editor_ctx_t *ctx, int key) {
 /* ========================= Modal Key Processing ============================ */
 
 /* Process a single keypress - delegates to modal editing module */
-void editor_process_keypress(editor_ctx_t *ctx, int fd) {
+int editor_process_keypress(editor_ctx_t *ctx, int fd) {
     /* All modal editing logic is now in loki_modal.c */
-    modal_process_keypress(ctx, fd);
+    return modal_process_keypress(ctx, fd);
 }
 
 void init_editor(editor_ctx_t *ctx) {

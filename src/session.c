@@ -247,9 +247,8 @@ int editor_session_handle_event(EditorSession *session, const EditorEvent *event
 
     /* Handle resize event */
     if (event->type == EVENT_RESIZE) {
-        /* Reserve the status/message rows, matching modal_process_event. */
-        session->ctx.view.screenrows = event->data.resize.rows - STATUS_ROWS;
-        if (session->ctx.view.screenrows < 1) session->ctx.view.screenrows = 1;
+        /* rows is the text area; hosts exclude their own status lines. */
+        session->ctx.view.screenrows = event->data.resize.rows;
         session->ctx.view.screencols = event->data.resize.cols;
         return 0;
     }
