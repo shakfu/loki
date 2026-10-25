@@ -177,43 +177,39 @@ end
 
 ### Async HTTP Requests
 
-Loki can make HTTP requests via `loki.async_http()`. These requests include multiple layers of security hardening:
+Loki can make HTTP requests via `loki.async_http()`. HTTP support is off by default; build with `-DLOKI_ENABLE_HTTP=ON`. Limits are compile-time constants in `src/http.h`.
 
 **Transport Security:**
 
-- Run with **libcurl** (industry-standard, well-audited)
-- Support **HTTPS with SSL/TLS verification** (default: enabled)
-- Certificate validation against system CA bundle
+- libcurl with TLS peer and host verification enabled
+- Certificates checked against the system CA bundle
 
 **Resource Limits:**
 
-- **60-second request timeout** to prevent hangs
-- **10-second connection timeout**
-- **10 concurrent requests maximum** to prevent resource exhaustion
-- **10MB response size limit** to prevent memory exhaustion
-- **5MB request body size limit** to prevent excessive uploads
-- **8KB total headers size limit** to prevent header-based attacks
+- 60-second request timeout, 10-second connect timeout
+- 10 pending requests at most
+- 10MB response limit; a larger response aborts the transfer
+- 5MB request body limit
+- 5 redirects at most, restricted to `http` and `https`
 
 **URL Validation:**
 
-- Only `http://` and `https://` schemes allowed (rejects `file://`, `ftp://`, etc.)
-- **2048 character URL length limit** to prevent buffer issues
-- Null byte injection detection
-- Control character filtering (prevents header injection)
+- Only `http://` and `https://` schemes
+- 2048-character length limit
+- Control characters rejected
+- Internal hosts rejected, both in the URL and at connect time (see [Threat Model](#threat-model))
 
 **Rate Limiting:**
 
-- **100 requests per 60-second window** to prevent abuse
-- Per-process global rate limit (applies to all async_http calls)
-- Automatic window reset after timeout
+- 60 requests per fixed 60-second window, process-wide
 
 **Header Validation:**
 
-- Maximum 100 headers per request
-- Maximum 1KB per individual header
-- Maximum 8KB total headers size
-- Null byte and control character detection
-- Prevents HTTP header injection attacks
+- 100 headers at most, 1KB each, 8KB in total
+- Each header must be `Name: value`, with a name of letters, digits, `-` and `_`
+- Control characters rejected, including CR, LF and tab
+
+An embedded NUL in the URL, body or a header is rejected. C would otherwise see only the part before it.
 
 ### SSL/TLS Verification
 
@@ -330,45 +326,31 @@ end
 
 ### Understanding Security Limits
 
-**Rate Limiting:**
-If you exceed 100 requests per minute, you'll receive an error message indicating how long until the rate limit resets:
+`loki.async_http()` returns `nil` and a message when it rejects a request:
 
-```text
-Rate limit exceeded (max 100 requests per 60 seconds, retry in 45 seconds)
-```
+| Check | Message |
+|-------|---------|
+| URL scheme, length, control characters | `URL must use http:// or https://`, `URL too long (max 2048)`, `URL contains invalid characters` |
+| Internal host | `URL points at an internal address` |
+| Embedded NUL | `URL contains a NUL byte`, `Request body contains a NUL byte`, `Header contains a NUL byte` |
+| Body over 5MB | `Request body too large` |
+| Headers | `Too many headers (max 100)`, `Headers too large (max 8192 bytes)`, or the header format error |
+| Rate limit | `Rate limit exceeded` |
+| 10 requests already pending | `Too many pending requests` |
 
-**Request Body Size:**
-If your request body exceeds 5MB, the request will be rejected immediately:
+The rate-limit and pending-request messages also appear in the status bar.
 
-```text
-HTTP security error: Request body too large (5242880 bytes, max 5242880 bytes)
-```
-
-**URL Length:**
-URLs longer than 2048 characters are rejected:
-
-```text
-HTTP security error: URL too long (max 2048 characters)
-```
-
-**Header Limits:**
-Individual headers over 1KB or total headers exceeding 8KB are rejected:
-
-```text
-HTTP security error: Header 3 too long (1536 bytes, max 1024)
-HTTP security error: Total headers size too large (9216 bytes, max 8192 bytes)
-```
+A response over 10MB, a refused internal connection, or any other transfer failure reaches the callback as `response.error`, with `response.status` set to 0. An HTTP status of 400 or above sets `response.error` to `HTTP error <code>`.
 
 ### Handling Security Errors
 
 ```lua
 function make_api_request(url, body)
-    local request_id = loki.async_http(url, "POST", body, {}, "api_callback")
+    local request_id, err = loki.async_http(url, "POST", body, {}, "api_callback")
 
     if not request_id then
-        -- Request was rejected by security validation
-        -- Check status bar for detailed error message
-        loki.status("Request failed security validation - check status bar")
+        -- Rejected before sending; err says why
+        loki.status("HTTP request rejected: " .. err)
         return false
     end
 
@@ -377,7 +359,7 @@ end
 
 function api_callback(response)
     if response.error then
-        -- Network or curl error
+        -- Transfer failure, refused connection, or HTTP status >= 400
         loki.status("HTTP Error: " .. response.error)
         return
     end
@@ -393,183 +375,55 @@ end
 - [ ] Store API keys in environment variables or `~/.loki/secrets.lua`
 - [ ] Never commit credentials to version control
 - [ ] Validate all HTTP responses before processing
-- [ ] Stay within rate limits (100 requests/minute)
+- [ ] Stay within rate limits (60 requests/minute)
 - [ ] Keep request bodies under 5MB
 - [ ] Keep URLs under 2KB
 - [ ] Use timeouts to prevent indefinite hangs
 - [ ] Log errors without exposing sensitive data
 
-### HTTP Security Hardening (v0.4.6+)
+### HTTP Security Hardening
 
-**Implementation Date:** January 2025
-**Location:** `src/loki_editor.c` (lines 157-354)
-**Status:** Production-ready
-
-Loki implements defense-in-depth HTTP security through multiple validation layers. Every `loki.async_http()` request passes through four sequential security checks before execution.
+Implementation: `src/http.c`. Limits: `src/http.h`.
 
 #### Threat Model
 
 | Threat | Attack Vector | Mitigation | Severity |
 |--------|---------------|------------|----------|
 | SSRF (Server-Side Request Forgery) | `file://`, `ftp://`, `gopher://` schemes | URL scheme validation | **CRITICAL** |
-| DoS (Denial of Service) | Request flooding | Rate limiting (100/min) | **HIGH** |
+| SSRF to internal hosts | Internal address literals, names resolving to internal addresses, redirects | URL host check, plus a connect-time address check on every connection | **CRITICAL** |
+| DoS (Denial of Service) | Request flooding | Rate limiting (60/min) | **HIGH** |
 | Memory exhaustion | Large request bodies | 5MB request body limit | **HIGH** |
 | Memory exhaustion | Large response bodies | 10MB response limit | **HIGH** |
 | Header injection | Malicious headers with `\r\n` | Control character filtering | **MEDIUM** |
-| URL injection | Embedded null bytes, control chars | URL sanitization | **MEDIUM** |
-| Resource exhaustion | Too many concurrent requests | 10 concurrent request limit | **MEDIUM** |
+| URL injection | Control characters | Control character filtering | **MEDIUM** |
+| Resource exhaustion | Too many concurrent requests | 10 pending request limit | **MEDIUM** |
+
+Internal addresses are loopback, RFC1918, link-local (including `169.254.169.254`), CGNAT `100.64.0.0/10`, multicast, reserved, and IPv6 equivalents including IPv4-mapped forms. `LOKI_HTTP_ALLOW_INTERNAL` disables both checks. With an HTTP proxy configured, the connect-time check sees the proxy address: a loopback proxy needs `LOKI_HTTP_ALLOW_INTERNAL`, and a remote proxy resolves the destination itself, so the check cannot apply.
 
 #### Security Layers
 
-All security checks execute in `start_async_http_request()` before the HTTP request is created. Validation runs in this order:
+Checks run in this order. Each one rejects the request before any network I/O.
 
-**1. URL Validation** (`validate_http_url()`)
-
-```c
-/* Checks performed: */
-- URL not empty or NULL
-- URL length ≤ 2048 characters
-- Scheme must be http:// or https:// (rejects file://, ftp://, etc.)
-- No null bytes (prevents injection: "http://good.com\0http://evil.com")
-- No control characters except tab (prevents header injection)
-
-/* Example rejection: */
-loki.async_http("ftp://evil.com/file", "GET", nil, {}, "callback")
-// Returns: nil
-// Status: "HTTP security error: URL must start with http:// or https://"
-```
-
-**2. Rate Limiting** (`check_rate_limit()`)
-
-```c
-/* Algorithm: Sliding window */
-- Window: 60 seconds
-- Max requests: 100 per window
-- Global counter (applies to all async_http calls)
-- Window resets after timeout
-
-/* Example rejection: */
--- After 100 requests in 60 seconds:
-loki.async_http("https://api.com", "GET", nil, {}, "callback")
-// Returns: nil
-// Status: "Rate limit exceeded (max 100 requests per 60 seconds, retry in 45 seconds)"
-```
-
-**3. Request Body Validation** (`validate_request_body()`)
-
-```c
-/* Checks performed: */
-- Body size ≤ 5MB (5,242,880 bytes)
-- Prevents memory exhaustion attacks
-- Applies only to POST/PUT requests with body
-
-/* Example rejection: */
-local huge_body = string.rep("x", 6000000)  -- 6MB
-loki.async_http("https://api.com", "POST", huge_body, {}, "callback")
-// Returns: nil
-// Status: "HTTP security error: Request body too large (6000000 bytes, max 5242880 bytes)"
-```
-
-**4. Header Validation** (`validate_headers()`)
-
-```c
-/* Checks performed: */
-- Maximum 100 headers per request
-- Each header ≤ 1KB (1024 bytes)
-- Total headers ≤ 8KB (8192 bytes)
-- No null bytes in headers
-- No control characters except \t, \r, \n
-
-/* Example rejection: */
-local headers = {}
-for i = 1, 150 do
-    headers[i] = "X-Header-" .. i .. ": value"
-end
-loki.async_http("https://api.com", "GET", nil, headers, "callback")
-// Returns: nil
-// Status: "HTTP security error: Invalid number of headers: 150"
-```
-
-#### Implementation Architecture
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│ loki.async_http(url, method, body, headers, callback)       │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│ start_async_http_request()                                  │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 1. validate_http_url(url)                           │    │
-│  │    ├─ Check scheme (http/https only)                │    │
-│  │    ├─ Check length (≤2048 chars)                    │    │
-│  │    ├─ Check for null bytes                          │    │
-│  │    └─ Check for control characters                  │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                        │ PASS                               │
-│                        ▼                                    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 2. check_rate_limit()                               │    │
-│  │    ├─ Check window (60 seconds)                     │    │
-│  │    ├─ Check count (≤100 requests)                   │    │
-│  │    └─ Increment counter                             │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                        │ PASS                               │
-│                        ▼                                    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 3. validate_request_body(body)                      │    │
-│  │    └─ Check size (≤5MB)                             │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                        │ PASS                               │
-│                        ▼                                    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 4. validate_headers(headers)                        │    │
-│  │    ├─ Check count (≤100)                            │    │
-│  │    ├─ Check size (each ≤1KB, total ≤8KB)            │    │
-│  │    ├─ Check for null bytes                          │    │
-│  │    └─ Check for control characters                  │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                        │ PASS                               │
-│                        ▼                                    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 5. Create CURL request                              │    │
-│  │    ├─ SSL/TLS verification (default enabled)        │    │
-│  │    ├─ Response size limit (10MB)                    │    │
-│  │    ├─ Timeout (60 seconds total, 10s connect)       │    │
-│  │    └─ Add to multi handle (max 10 concurrent)       │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                             │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-                        ▼
-              ┌──────────────────┐
-              │ Async execution  │
-              │ (libcurl multi)  │
-              └──────────────────┘
-                        │
-                        ▼
-              ┌──────────────────┐
-              │ Lua callback     │
-              │ with response    │
-              └──────────────────┘
-```
-
-**Fast-Fail Design:** Each validation layer returns immediately on failure with a descriptive error message. No HTTP request is created if any validation fails.
+1. `lua_loki_async_http()`: `loki_http_validate_url()`, body size, then each header through `loki_http_validate_header()` and the count and total-size limits.
+2. `loki_http_request()`: URL and body again (for C callers), `check_rate_limit()`, then the pending-request limit.
+3. curl options: TLS verification, timeouts, redirect limit and protocols, and `open_socket_callback()`, which refuses internal addresses on every connection.
+4. `write_callback()`: aborts the transfer once the response passes 10MB.
 
 #### Configuration Constants
 
-All security limits are defined as compile-time constants in `src/loki_editor.c`:
-
 ```c
-#define MAX_ASYNC_REQUESTS 10                      // Concurrent request limit
-#define MAX_HTTP_RESPONSE_SIZE (10 * 1024 * 1024)  // 10MB response limit
-#define MAX_HTTP_REQUEST_BODY_SIZE (5 * 1024 * 1024)  // 5MB request body limit
-#define MAX_HTTP_URL_LENGTH 2048                   // URL length limit
-#define MAX_HTTP_HEADER_SIZE 8192                  // Total headers size (8KB)
-#define HTTP_RATE_LIMIT_WINDOW 60                  // Rate limit window (seconds)
-#define HTTP_RATE_LIMIT_MAX_REQUESTS 100           // Max requests per window
+/* src/http.h */
+#define LOKI_HTTP_MAX_ASYNC_REQUESTS  10
+#define LOKI_HTTP_MAX_RESPONSE_SIZE   (10 * 1024 * 1024)  /* 10MB */
+#define LOKI_HTTP_MAX_URL_LENGTH      2048
+#define LOKI_HTTP_MAX_BODY_SIZE       (5 * 1024 * 1024)   /* 5MB */
+#define LOKI_HTTP_MAX_HEADERS         100
+#define LOKI_HTTP_MAX_HEADER_SIZE     1024
+#define LOKI_HTTP_MAX_HEADERS_TOTAL   8192
+#define LOKI_HTTP_MAX_REDIRECTS       5
+#define LOKI_HTTP_RATE_LIMIT          60      /* requests per minute */
+#define LOKI_HTTP_TIMEOUT             60      /* seconds */
+#define LOKI_HTTP_CONNECT_TIMEOUT     10      /* seconds */
 ```
 
 **Rationale for limits:**
@@ -578,87 +432,37 @@ All security limits are defined as compile-time constants in `src/loki_editor.c`
 - **Request body (5MB)**: Accommodates large JSON payloads while preventing abuse
 - **Response size (10MB)**: Allows API responses with substantial data
 - **Headers (8KB)**: Typical web server limit (Nginx: 8KB, Apache: 8KB default)
-- **Rate limit (100/min)**: Prevents flooding while allowing burst requests
-- **Concurrent requests (10)**: Balances parallelism with resource usage
+- **Rate limit (60/min)**: Prevents flooding while allowing burst requests
+- **Pending requests (10)**: Balances parallelism with resource usage
 
 #### Testing Security Features
 
-**Test URL validation:**
-
-```lua
--- Test scheme validation
-assert(loki.async_http("ftp://evil.com", "GET", nil, {}, "cb") == nil)
-assert(loki.async_http("file:///etc/passwd", "GET", nil, {}, "cb") == nil)
-assert(loki.async_http("https://safe.com", "GET", nil, {}, "cb") ~= nil)
-
--- Test length validation
-local long_url = "https://example.com/" .. string.rep("x", 3000)
-assert(loki.async_http(long_url, "GET", nil, {}, "cb") == nil)
-```
-
-**Test rate limiting:**
-
-```lua
--- Test rate limit enforcement
-local success_count = 0
-for i = 1, 105 do
-    local result = loki.async_http("https://httpbin.org/get", "GET", nil, {}, "cb")
-    if result then success_count = success_count + 1 end
-end
--- success_count should be ≤ 100 (rate limit enforced)
-print("Successful requests: " .. success_count)
-```
-
-**Test body size validation:**
-
-```lua
--- Test request body limits
-local small_body = string.rep("x", 1000)       -- 1KB - OK
-local medium_body = string.rep("x", 1000000)   -- 1MB - OK
-local large_body = string.rep("x", 6000000)    -- 6MB - REJECTED
-
-assert(loki.async_http("https://httpbin.org/post", "POST", small_body, {}, "cb") ~= nil)
-assert(loki.async_http("https://httpbin.org/post", "POST", medium_body, {}, "cb") ~= nil)
-assert(loki.async_http("https://httpbin.org/post", "POST", large_body, {}, "cb") == nil)
-```
-
-**Test header validation:**
-
-```lua
--- Test header count limits
-local many_headers = {}
-for i = 1, 150 do
-    many_headers[i] = "X-Header-" .. i .. ": value"
-end
-assert(loki.async_http("https://httpbin.org/get", "GET", nil, many_headers, "cb") == nil)
-
--- Test header size limits
-local huge_header = "X-Huge: " .. string.rep("x", 2000)
-assert(loki.async_http("https://httpbin.org/get", "GET", nil, {huge_header}, "cb") == nil)
-```
+The regression tests are in `tests/test_http_security.c`. Run them with `make test-http`; `make test` builds without HTTP and skips them.
 
 #### Bypassing Security Measures
 
 **WARNING:** Do not attempt to bypass these security measures. They exist to protect against:
 
-- **SSRF attacks**: Reading local files via `file://` URIs
+- **SSRF attacks**: Reading local files via `file://` URIs, or reaching internal services
 - **DoS attacks**: Exhausting editor memory/CPU
 - **Injection attacks**: Manipulating HTTP protocol with control characters
 - **Resource exhaustion**: Overwhelming the system with requests
 
 **If you need higher limits:**
 
-1. **Modify source code**: Edit constants in `src/loki_editor.c` and recompile
+1. **Modify source code**: Edit constants in `src/http.h` and recompile
 2. **Understand risks**: Document why you need higher limits
 3. **Test thoroughly**: Ensure your use case doesn't introduce vulnerabilities
 4. **Keep SSL/TLS verification enabled**: Never disable certificate validation
 
+`LOKI_HTTP_ALLOW_INTERNAL` is the only runtime override. It permits internal hosts, for example a local model server.
+
 **Example of increasing limits (requires recompilation):**
 
 ```c
-// src/loki_editor.c
-#define MAX_HTTP_REQUEST_BODY_SIZE (50 * 1024 * 1024)  // Increase to 50MB
-#define HTTP_RATE_LIMIT_MAX_REQUESTS 1000              // Increase to 1000/min
+/* src/http.h */
+#define LOKI_HTTP_MAX_BODY_SIZE       (50 * 1024 * 1024)  /* 50MB */
+#define LOKI_HTTP_RATE_LIMIT          1000                /* per minute */
 ```
 
 **Disabling security is strongly discouraged.** If limits are insufficient for your use case, consider:
@@ -689,18 +493,7 @@ Loki detects and rejects binary files to prevent:
 - Potential buffer overflows from malformed data
 - Accidental modification of executable files
 
-**Implementation** (loki_core.c:679-720):
-
-```c
-/* Detect binary files by checking for null bytes in first 1KB */
-size_t check_size = (file_size < 1024) ? file_size : 1024;
-for (size_t i = 0; i < check_size; i++) {
-    if (sample[i] == '\0') {
-        fclose(fp);
-        return -1;  /* Binary file detected */
-    }
-}
-```
+**Implementation** (`editor_open()` in `src/core.c`): a NUL byte in the first 1KB rejects the file with `Cannot open binary file`.
 
 ### Path Traversal
 
@@ -916,5 +709,5 @@ We thank the following researchers for responsible disclosure:
 
 ---
 
-**Last Updated**: 2025-01-12
+**Last Updated**: 2026-10-25
 **Version**: 1.0

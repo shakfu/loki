@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := all
-.PHONY: all build configure library loki all clean test show-config check-sync
+.PHONY: all build configure library loki all clean test test-http show-config check-sync
 
 BUILD_DIR ?= build
 CMAKE ?= cmake
@@ -23,6 +23,12 @@ show-config: configure
 
 test: build
 	@$(CMAKE) -E chdir $(BUILD_DIR) ctest --output-on-failure
+
+# Same suite plus the HTTP tests, in a separate tree so `test` keeps its config.
+test-http:
+	@$(CMAKE) -S . -B $(BUILD_DIR)/http -DLOKI_ENABLE_HTTP=ON
+	@$(CMAKE) --build $(BUILD_DIR)/http --config Release
+	@$(CMAKE) -E chdir $(BUILD_DIR)/http ctest --output-on-failure
 
 # Compare the generic-core files with psnd (upstream). PSND_DIR defaults to ../psnd.
 check-sync:

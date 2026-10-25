@@ -3,6 +3,8 @@
  * Implementation of asynchronous HTTP requests using libcurl.
  */
 
+/* inet_aton is BSD, hidden by the strict _POSIX_C_SOURCE set in CMake. */
+#define _DEFAULT_SOURCE
 #include "http.h"
 #include "internal.h"
 #include "loki/lua.h"
@@ -14,7 +16,11 @@
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
-#include <strings.h>  /* strcasecmp, strncasecmp */
+#include <strings.h>  /* strcasecmp */
+#include <stdint.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 /* Response data structure */
 typedef struct {
@@ -190,9 +196,53 @@ int loki_http_validate_header(const char *header, char *error_buf, size_t error_
     return 1;
 }
 
-/* Is this host one that should never be reachable from user script?
- * Blocks loopback, link-local (including the cloud metadata address) and the
- * RFC1918 ranges, so a request cannot be aimed at the local network. */
+static int allow_internal(void) {
+    return getenv("LOKI_HTTP_ALLOW_INTERNAL") != NULL;
+}
+
+/* Loopback, private, link-local (incl. cloud metadata), CGNAT, multicast and
+ * reserved ranges. `a` is in host byte order. */
+static int ipv4_is_internal(uint32_t a) {
+    unsigned int o1 = a >> 24, o2 = (a >> 16) & 0xff;
+    return o1 == 0 || o1 == 10 || o1 == 127 || o1 >= 224 ||
+           (o1 == 100 && (o2 & 0xc0) == 64) ||
+           (o1 == 169 && o2 == 254) ||
+           (o1 == 172 && (o2 & 0xf0) == 16) ||
+           (o1 == 192 && o2 == 168);
+}
+
+static int ipv6_is_internal(const unsigned char *b) {
+    static const unsigned char zero[12] = {0};
+    static const unsigned char mapped[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+    static const unsigned char nat64[12] = {0,0x64,0xff,0x9b};
+    /* ::/96 (::, ::1, IPv4-compatible), ::ffff:0:0/96 and 64:ff9b::/96 all
+     * embed an IPv4 address in the low 32 bits. */
+    if (!memcmp(b, zero, 12) || !memcmp(b, mapped, 12) || !memcmp(b, nat64, 12)) {
+        uint32_t v4 = ((uint32_t)b[12] << 24) | ((uint32_t)b[13] << 16) |
+                      ((uint32_t)b[14] << 8) | b[15];
+        if (!memcmp(b, zero, 12) && v4 == 1) return 1;   /* ::1 */
+        return ipv4_is_internal(v4);
+    }
+    return (b[0] & 0xfe) == 0xfc ||                   /* unique-local fc00::/7 */
+           (b[0] == 0xfe && b[1] >= 0x80) ||          /* link/site-local */
+           b[0] == 0xff;                              /* multicast */
+}
+
+int loki_http_sockaddr_is_internal(const struct sockaddr *sa) {
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *in = (const struct sockaddr_in *)sa;
+        return ipv4_is_internal(ntohl(in->sin_addr.s_addr));
+    }
+    if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)sa;
+        return ipv6_is_internal(in6->sin6_addr.s6_addr);
+    }
+    return 1;  /* unknown family: refuse */
+}
+
+/* Is the URL host an internal name or address literal? inet_aton accepts the
+ * same shorthand the resolver does (127.1, 0x7f000001, 0177.0.0.1). Names that
+ * merely resolve to internal addresses are caught at connect time. */
 static int host_is_internal(const char *host, size_t hostlen) {
     char buf[256];
     if (hostlen == 0 || hostlen >= sizeof(buf)) return 0;
@@ -207,25 +257,27 @@ static int host_is_internal(const char *host, size_t hostlen) {
         if (close) *close = '\0';
     }
 
+    size_t n = strlen(h);
+    while (n > 0 && h[n - 1] == '.') h[--n] = '\0';  /* "localhost." */
     if (strcasecmp(h, "localhost") == 0) return 1;
-    if (strcmp(h, "::1") == 0 || strcmp(h, "::") == 0) return 1;
-    if (strncasecmp(h, "fe80:", 5) == 0) return 1;   /* IPv6 link-local */
-    if (strncasecmp(h, "fc", 2) == 0 || strncasecmp(h, "fd", 2) == 0) {
-        if (strchr(h, ':')) return 1;                /* IPv6 unique-local */
-    }
+    if (n > 10 && strcasecmp(h + n - 10, ".localhost") == 0) return 1;
 
-    unsigned int a, b, c, d;
-    if (sscanf(h, "%u.%u.%u.%u", &a, &b, &c, &d) == 4 &&
-        a < 256 && b < 256 && c < 256 && d < 256) {
-        if (a == 127) return 1;                      /* loopback */
-        if (a == 10) return 1;                       /* RFC1918 */
-        if (a == 172 && b >= 16 && b <= 31) return 1;
-        if (a == 192 && b == 168) return 1;
-        if (a == 169 && b == 254) return 1;          /* link-local / metadata */
-        if (a == 0) return 1;
-    }
-
+    struct in_addr v4;
+    struct in6_addr v6;
+    if (inet_pton(AF_INET6, h, &v6) == 1) return ipv6_is_internal(v6.s6_addr);
+    if (inet_aton(h, &v4)) return ipv4_is_internal(ntohl(v4.s_addr));
     return 0;
+}
+
+/* Refuse connections to internal addresses. curl calls this for every
+ * connection, so it covers redirects and names resolving to internal hosts. */
+static curl_socket_t open_socket_callback(void *clientp, curlsocktype purpose,
+                                          struct curl_sockaddr *address) {
+    (void)clientp;
+    (void)purpose;
+    if (!allow_internal() && loki_http_sockaddr_is_internal(&address->addr))
+        return CURL_SOCKET_BAD;
+    return socket(address->family, address->socktype, address->protocol);
 }
 
 int loki_http_validate_url(const char *url, char *error_buf, size_t error_buf_size) {
@@ -257,7 +309,7 @@ int loki_http_validate_url(const char *url, char *error_buf, size_t error_buf_si
     }
 
     /* Reject internal hosts unless explicitly allowed. */
-    if (!getenv("LOKI_HTTP_ALLOW_INTERNAL")) {
+    if (!allow_internal()) {
         const char *host = strstr(url, "://");
         host = host ? host + 3 : url;
         const char *at = strchr(host, '@');       /* skip userinfo */
@@ -284,34 +336,34 @@ int loki_http_validate_url(const char *url, char *error_buf, size_t error_buf_si
     return 1;
 }
 
+/* Report a request failure in the status bar and in error_buf. */
+static int request_failed(editor_ctx_t *ctx, char *error_buf, size_t error_buf_size,
+                          const char *msg) {
+    if (ctx) editor_set_status_msg(ctx, "%s", msg);
+    if (error_buf && error_buf_size) snprintf(error_buf, error_buf_size, "%s", msg);
+    return -1;
+}
+
 int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
                       const char *body, const char **headers, int num_headers,
-                      const char *lua_callback) {
-    char error_buf[256];
+                      const char *lua_callback, char *error_buf, size_t error_buf_size) {
+    char msg[256];
 
     /* Validate URL */
-    if (!loki_http_validate_url(url, error_buf, sizeof(error_buf))) {
-        if (ctx) editor_set_status_msg(ctx, "%s", error_buf);
-        return -1;
-    }
+    if (!loki_http_validate_url(url, msg, sizeof(msg)))
+        return request_failed(ctx, error_buf, error_buf_size, msg);
 
     /* Check body size */
-    if (body && strlen(body) > LOKI_HTTP_MAX_BODY_SIZE) {
-        if (ctx) editor_set_status_msg(ctx, "Request body too large");
-        return -1;
-    }
+    if (body && strlen(body) > LOKI_HTTP_MAX_BODY_SIZE)
+        return request_failed(ctx, error_buf, error_buf_size, "Request body too large");
 
     /* Check rate limit */
-    if (!check_rate_limit()) {
-        if (ctx) editor_set_status_msg(ctx, "Rate limit exceeded");
-        return -1;
-    }
+    if (!check_rate_limit())
+        return request_failed(ctx, error_buf, error_buf_size, "Rate limit exceeded");
 
     /* Check max pending requests */
-    if (num_pending >= LOKI_HTTP_MAX_ASYNC_REQUESTS) {
-        if (ctx) editor_set_status_msg(ctx, "Too many pending requests");
-        return -1;
-    }
+    if (num_pending >= LOKI_HTTP_MAX_ASYNC_REQUESTS)
+        return request_failed(ctx, error_buf, error_buf_size, "Too many pending requests");
 
     loki_http_init();
 
@@ -323,17 +375,18 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
             break;
         }
     }
-    if (slot == -1) return -1;
+    if (slot == -1)
+        return request_failed(ctx, error_buf, error_buf_size, "Too many pending requests");
 
     /* Allocate request */
     async_http_request_t *req = malloc(sizeof(async_http_request_t));
-    if (!req) return -1;
+    if (!req) return request_failed(ctx, error_buf, error_buf_size, "Out of memory");
 
     memset(req, 0, sizeof(async_http_request_t));
     req->response.data = malloc(1);
     if (!req->response.data) {
         free(req);
-        return -1;
+        return request_failed(ctx, error_buf, error_buf_size, "Out of memory");
     }
     req->response.data[0] = '\0';
     req->response.size = 0;
@@ -342,7 +395,7 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
     if (!req->lua_callback) {
         free(req->response.data);
         free(req);
-        return -1;
+        return request_failed(ctx, error_buf, error_buf_size, "Out of memory");
     }
 
     /* Initialize curl handles */
@@ -351,7 +404,7 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
         free(req->response.data);
         free(req->lua_callback);
         free(req);
-        return -1;
+        return request_failed(ctx, error_buf, error_buf_size, "Out of memory");
     }
 
     req->multi_handle = curl_multi_init();
@@ -360,7 +413,7 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
         free(req->response.data);
         free(req->lua_callback);
         free(req);
-        return -1;
+        return request_failed(ctx, error_buf, error_buf_size, "Out of memory");
     }
 
     /* Set curl options */
@@ -370,6 +423,7 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
     curl_easy_setopt(req->easy_handle, CURLOPT_ERRORBUFFER, req->error_buffer);
     curl_easy_setopt(req->easy_handle, CURLOPT_TIMEOUT, (long)LOKI_HTTP_TIMEOUT);
     curl_easy_setopt(req->easy_handle, CURLOPT_CONNECTTIMEOUT, (long)LOKI_HTTP_CONNECT_TIMEOUT);
+    curl_easy_setopt(req->easy_handle, CURLOPT_OPENSOCKETFUNCTION, open_socket_callback);
     curl_easy_setopt(req->easy_handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(req->easy_handle, CURLOPT_MAXREDIRS,
                      (long)LOKI_HTTP_MAX_REDIRECTS);
@@ -433,8 +487,8 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
         free(req->response.data);
         free(req->lua_callback);
         free(req);
-        if (ctx) editor_set_status_msg(ctx, "HTTP request failed to start");
-        return -1;
+        return request_failed(ctx, error_buf, error_buf_size,
+                              "HTTP request failed to start");
     }
 
     /* Store request */
@@ -537,24 +591,30 @@ int loki_http_pending_count(void) {
 
 /* ======================= Lua Binding ======================= */
 
+/* Push the (nil, message) failure result. */
+static int push_http_error(lua_State *L, const char *msg) {
+    lua_pushnil(L);
+    lua_pushstring(L, msg);
+    return 2;
+}
+
 int lua_loki_async_http(lua_State *L) {
-    const char *url = luaL_checkstring(L, 1);
+    /* C sees each string up to its first NUL, so a NUL would silently
+     * truncate what is validated and sent. */
+    size_t url_len, body_len = 0;
+    const char *url = luaL_checklstring(L, 1, &url_len);
     const char *method = luaL_optstring(L, 2, "GET");
-    const char *body = lua_isnil(L, 3) ? NULL : luaL_optstring(L, 3, NULL);
+    const char *body = lua_isnil(L, 3) ? NULL : luaL_optlstring(L, 3, NULL, &body_len);
+    if (strlen(url) != url_len) return push_http_error(L, "URL contains a NUL byte");
+    if (body && strlen(body) != body_len)
+        return push_http_error(L, "Request body contains a NUL byte");
 
-    /* Validate URL first */
     char error_buf[256];
-    if (!loki_http_validate_url(url, error_buf, sizeof(error_buf))) {
-        /* Return nil for invalid URLs */
-        lua_pushnil(L);
-        return 1;
-    }
+    if (!loki_http_validate_url(url, error_buf, sizeof(error_buf)))
+        return push_http_error(L, error_buf);
 
-    /* Validate body size */
-    if (body && strlen(body) > LOKI_HTTP_MAX_BODY_SIZE) {
-        lua_pushnil(L);
-        return 1;
-    }
+    if (body && body_len > LOKI_HTTP_MAX_BODY_SIZE)
+        return push_http_error(L, "Request body too large");
 
     /* Check the callback before allocating anything: luaL_checkstring
      * longjmps on a bad argument, which would leak the headers array. */
@@ -573,15 +633,14 @@ int lua_loki_async_http(lua_State *L) {
         }
 
         if (num_headers > LOKI_HTTP_MAX_HEADERS) {
-            lua_pushnil(L);
-            return 1;
+            snprintf(error_buf, sizeof(error_buf), "Too many headers (max %d)",
+                     LOKI_HTTP_MAX_HEADERS);
+            return push_http_error(L, error_buf);
         }
 
         if (num_headers > 0) {
             headers = malloc(sizeof(char*) * num_headers);
-            if (!headers) {
-                return luaL_error(L, "Out of memory");
-            }
+            if (!headers) return push_http_error(L, "Out of memory");
             int i = 0;
             size_t total = 0;
             int bad = 0;
@@ -589,23 +648,25 @@ int lua_loki_async_http(lua_State *L) {
             while (lua_next(L, 4) != 0) {
                 /* lua_tostring returns NULL for a non-string value; strdup(NULL)
                  * is undefined and used to crash here. */
-                const char *value = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
-                char hdr_err[128];
-                if (!loki_http_validate_header(value, hdr_err, sizeof(hdr_err))) {
+                size_t value_len = 0;
+                const char *value = lua_isstring(L, -1)
+                                    ? lua_tolstring(L, -1, &value_len) : NULL;
+                char *header_str = NULL;
+                if (value && strlen(value) != value_len) {
+                    snprintf(error_buf, sizeof(error_buf), "Header contains a NUL byte");
                     bad = 1;
+                } else if (!loki_http_validate_header(value, error_buf, sizeof(error_buf))) {
+                    bad = 1;
+                } else if ((total += value_len) > LOKI_HTTP_MAX_HEADERS_TOTAL) {
+                    snprintf(error_buf, sizeof(error_buf),
+                             "Headers too large (max %d bytes)", LOKI_HTTP_MAX_HEADERS_TOTAL);
+                    bad = 1;
+                } else if (!(header_str = strdup(value))) {
+                    snprintf(error_buf, sizeof(error_buf), "Out of memory");
+                    bad = 1;
+                }
+                if (bad) {
                     lua_pop(L, 2);  /* value + key: stop iterating */
-                    break;
-                }
-                total += strlen(value);
-                if (total > LOKI_HTTP_MAX_HEADERS_TOTAL) {
-                    bad = 1;
-                    lua_pop(L, 2);
-                    break;
-                }
-                char *header_str = strdup(value);
-                if (!header_str) {
-                    bad = 1;
-                    lua_pop(L, 2);
                     break;
                 }
                 headers[i++] = header_str;
@@ -617,8 +678,7 @@ int lua_loki_async_http(lua_State *L) {
                     free((void*)headers[j]);
                 }
                 free(headers);
-                lua_pushnil(L);
-                return 1;
+                return push_http_error(L, error_buf);
             }
         }
     }
@@ -628,7 +688,8 @@ int lua_loki_async_http(lua_State *L) {
     editor_ctx_t *ctx = loki_lua_get_editor_context(L);
 
     /* Start request */
-    int req_id = loki_http_request(ctx, url, method, body, headers, num_headers, callback);
+    int req_id = loki_http_request(ctx, url, method, body, headers, num_headers, callback,
+                                   error_buf, sizeof(error_buf));
 
     /* Free headers */
     if (headers) {
@@ -638,11 +699,7 @@ int lua_loki_async_http(lua_State *L) {
         free(headers);
     }
 
-    if (req_id >= 0) {
-        lua_pushinteger(L, req_id);
-    } else {
-        lua_pushnil(L);
-    }
-
+    if (req_id < 0) return push_http_error(L, error_buf);
+    lua_pushinteger(L, req_id);
     return 1;
 }

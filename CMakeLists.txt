@@ -206,6 +206,7 @@ if(BUILD_TESTS)
         test_json
         test_jsonrpc
         test_command_handlers
+        test_lua_modules
     )
 
     foreach(test_name ${LOKI_TESTS})
@@ -219,6 +220,8 @@ if(BUILD_TESTS)
         target_link_libraries(${test_name} PRIVATE libloki test_framework)
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
+    target_compile_definitions(test_lua_modules PRIVATE
+        LOKI_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.loki/modules")
 
     # HTTP tests (only if HTTP enabled)
     if(LOKI_ENABLE_HTTP)

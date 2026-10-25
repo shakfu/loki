@@ -20,7 +20,7 @@ Complete documentation for Loki's asynchronous HTTP client API.
 ### Function Signature
 
 ```lua
-loki.async_http(url, method, body, headers, callback) → request_id | nil
+loki.async_http(url, method, body, headers, callback) → request_id | nil, error
 ```
 
 ### Parameters
@@ -36,7 +36,7 @@ loki.async_http(url, method, body, headers, callback) → request_id | nil
 ### Return Value
 
 - **Success**: Returns integer request ID
-- **Failure**: Returns `nil` if request couldn't be initiated
+- **Failure**: Returns `nil` and an error message, for example `nil, "URL points at an internal address"`
 
 ### Response Format
 

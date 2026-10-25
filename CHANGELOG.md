@@ -24,6 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Security
 
+- **Internal-host blocking now applies to resolved addresses and redirects**: the check compared only the URL's host string, with a dotted-quad `sscanf`. `127.1`, `2130706433`, `0x7f.0.0.1`, `[::ffff:127.0.0.1]` and `localhost.` passed it. Names resolving to internal addresses passed too, and redirects were never checked. curl's open-socket callback now refuses internal addresses on every connection. A per-redirect URL check would still miss DNS answers. The URL check parses literals with `inet_aton`/`inet_pton` and adds CGNAT, multicast and NAT64 ranges, so the common case fails before any network I/O.
+
 - **Project-local Lua config runs only in trusted directories**: opening a file in a cloned repo used to run its `.loki/init.lua` with full `os` and `io` access. Projects are now trusted with `:trust`, which records the resolved path in `~/.loki/trusted`. In an untrusted project, `require()` also ignores the project's `.loki/` and relative `package.path`/`package.cpath` entries, since a home config could otherwise load `./languages.lua` from the checkout. A trust list keeps per-project config; loading only `~/.loki/init.lua` would have dropped it.
 
   The bundled `.loki/init.lua` no longer extends `package.path` itself. loki adds `.loki/modules` for trusted projects and `~/.loki/modules` before running it.
@@ -31,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - **`LUA_SANDBOX` builds could load native code**: the sandbox kept `package.loadlib` and the C searchers, so `require` of a `.so` bypassed the removed `os`/`io` libraries. Both are now removed and `package.cpath` is empty.
 
 ### Added
+
+- **`make test-http`** builds with `-DLOKI_ENABLE_HTTP=ON` in `build/http` and runs the full suite, including the HTTP tests. CI now runs every OS and build type with HTTP both off and on.
 
 - **Tests for the code shared with psnd**: `test_json`, `test_jsonrpc` and `test_command_handlers` are ported from psnd. psnd's regression tests for terminal input, selection, indent, commands, buffers, modal keys and session resize are added to the matching loki suites.
 
@@ -40,11 +44,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Changed
 
+- **`loki.async_http()` returns `nil, message` on rejection**: it used to return a bare `nil` and drop the reason. A script can test a return value, but it cannot read the status bar. A URL, body or header containing a NUL byte is now rejected. C saw only the part before the NUL, so the request sent differed from the one the script passed, and a binary body was silently truncated. `loki_http_request()` takes an optional error buffer.
+
 - **`JSON_MAX_DEPTH` is public** (`src/json.h`) and lowered from 128 to 64, matching psnd.
 
 - **`:w`, `:e`, `:wq` and `:x` take the rest of the line** (`max_args` -1), so paths with spaces pass the argument-count check added in 0.5.1.
 
 ### Fixed
+
+- **Bundled HTTP modules**: the `test.http` and `example.fetch_quote` callbacks treated the response as a string. It is a table, so both raised an error on every response. `ai`, `example` and `test` also reported "request sent" when `loki.async_http()` rejected the request; they now show its error message. `test_lua_modules` loads the modules against the real `loki` API with a stubbed `loki.async_http`.
 
 - **A hung-up terminal could leave the editor spinning**: with SIGHUP ignored, `read()` on a hung-up tty returns 0 at once, forever, which looked like raw mode's 100 ms idle timeout. `terminal_read_key` now checks `poll()` for `POLLHUP` after a 0-byte read and returns -1. `editor_process_keypress` and `modal_process_keypress` now return that -1, and the editor loop and terminal host stop on it.
 

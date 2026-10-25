@@ -38,7 +38,7 @@ end
 
 -- Example function 3: Using async HTTP
 function M.fetch_quote()
-    loki.async_http(
+    local id, err = loki.async_http(
         "https://api.quotable.io/random",
         "GET",
         nil,
@@ -46,7 +46,13 @@ function M.fetch_quote()
         "example_quote_handler"
     )
 
-    if MODE == "editor" then
+    if not id then
+        if MODE == "editor" then
+            loki.status("Error: " .. err)
+        else
+            print("Error: " .. err)
+        end
+    elseif MODE == "editor" then
         loki.status("Fetching random quote...")
     else
         print("Fetching random quote...")
@@ -55,8 +61,14 @@ end
 
 -- Callback handler for HTTP request (must be global)
 function _G.example_quote_handler(response)
-    if response then
-        local content = response:match('"content"%s*:%s*"(.-[^\\])"')
+    if response.error then
+        if MODE == "editor" then
+            loki.status("Error: " .. response.error)
+        else
+            print("Error: " .. response.error)
+        end
+    elseif response.body then
+        local content = response.body:match('"content"%s*:%s*"(.-[^\\])"')
         if content then
             -- Unescape JSON
             content = content:gsub('\\n', '\n'):gsub('\\"', '"')

@@ -90,29 +90,36 @@ Access editor functionality via the `loki` global table:
 ### Async HTTP Function
 
 ```lua
-loki.async_http(url, method, body, headers, callback)
+local id, err = loki.async_http(url, method, body, headers, callback)
 ```
+
+Returns a request id, or `nil` and an error message if the request is rejected.
 
 **Parameters:**
 - `url` (string): The URL to request
 - `method` (string): HTTP method ("GET", "POST", etc.)
 - `body` (string or nil): Request body for POST requests
 - `headers` (table): Array of header strings (e.g., `{"Content-Type: application/json"}`)
-- `callback` (string): Name of Lua function to call with response
+- `callback` (string): Name of a global Lua function. It receives a table with `status`, `body` and `error`.
 
 **Example:**
 ```lua
 function my_callback(response)
-    loki.status("Got: " .. response)
+    if response.error then
+        loki.status("Error: " .. response.error)
+    else
+        loki.status("Got: " .. response.body)
+    end
 end
 
-loki.async_http(
+local id, err = loki.async_http(
     "https://api.example.com/data",
     "GET",
     nil,
     {"User-Agent: loki"},
     "my_callback"
 )
+if not id then loki.status("Error: " .. err) end
 ```
 
 ## Lua Highlight Hook

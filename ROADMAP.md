@@ -10,7 +10,7 @@ The codebase includes:
 
 - Editor sessions with an opaque public handle, editor model/view structures, and a JSON-RPC stdio harness.
 
-- Terminal input and rendering, modal editing, multiple buffers/tabs, selection, line numbers, word wrapping, and basic mouse click positioning.
+- Terminal input and rendering, modal editing, multiple buffers/tabs, selection, line numbers, and word wrapping.
 
 - Literal incremental search, basic current-line substitution, undo/redo, and automatic indentation with electric dedent.
 
@@ -28,11 +28,11 @@ The repository has focused unit-test executables configured in CMake. The exact 
 
 - Search is literal. It has no regex engine, search history, smart-case option, or complete Vim-style search command set. Substitution applies to the current line and lacks confirmation and whole-file operation.
 
-- Mouse handling can position the cursor on a left click, but terminal SGR mouse mode, drag selection, and wheel scrolling are not implemented.
+- Mouse input is not implemented. `modal.c` has a click handler for `EVENT_MOUSE`, but the terminal layer neither enables mouse reporting nor produces mouse events.
 
 - Lua configuration and modules are available, but there is no formal plugin discovery, metadata, lifecycle, or plugin-manager interface.
 
-- HTTP URL validation has known gaps around redirects and alternate numeric IP spellings; see `REVIEW.md`. Treat the internal-host restriction as incomplete until those cases are addressed.
+- Internal-host blocking for HTTP is checked at connect time, so it does not apply when an HTTP proxy resolves the destination. See `docs/security.md`.
 
 ## Planned Work
 
@@ -65,14 +65,6 @@ The following items are proposals and are not represented as completed features.
 - Highlight matching `()`, `{}`, and `[]` when the cursor is on a bracket.
 
 - Support nested and multi-line pairs, and report off-screen matches in the status area.
-
-#### HTTP request hardening
-
-- Ensure redirects cannot reach loopback, private, link-local, or metadata addresses.
-
-- Parse and normalize host addresses robustly, and validate resolved destinations.
-
-- Add regression coverage for redirects and alternate numeric address forms.
 
 ### Mid term
 
@@ -116,7 +108,9 @@ The following items are proposals and are not represented as completed features.
 
 #### Mouse interaction
 
-- Add terminal mouse-mode enable/disable with reliable cleanup.
+- Add terminal mouse-mode enable/disable with reliable cleanup, and parse SGR mouse reports into `EVENT_MOUSE`.
+
+- Support left-click cursor positioning through the existing `modal.c` handler.
 
 - Support drag selection and wheel scrolling.
 

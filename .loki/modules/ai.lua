@@ -145,7 +145,7 @@ function M.complete(text)
     }
 
     -- Make async HTTP request (non-blocking)
-    loki.async_http(
+    local id, err = loki.async_http(
         "https://api.openai.com/v1/chat/completions",
         "POST",
         json_body,
@@ -153,7 +153,13 @@ function M.complete(text)
         "ai_response_handler"  -- Callback function
     )
 
-    if MODE == "editor" then
+    if not id then
+        if MODE == "editor" then
+            loki.status("Error: " .. err)
+        else
+            print("Error: " .. err)
+        end
+    elseif MODE == "editor" then
         loki.status("AI request sent... (will appear when ready)")
     else
         print("AI request sent... (will appear when ready)")
@@ -202,7 +208,7 @@ function M.explain(code)
         "Authorization: Bearer " .. api_key
     }
 
-    loki.async_http(
+    local id, err = loki.async_http(
         "https://api.openai.com/v1/chat/completions",
         "POST",
         json_body,
@@ -210,7 +216,13 @@ function M.explain(code)
         "ai_response_handler"
     )
 
-    if MODE == "editor" then
+    if not id then
+        if MODE == "editor" then
+            loki.status("Error: " .. err)
+        else
+            print("Error: " .. err)
+        end
+    elseif MODE == "editor" then
         loki.status("Requesting code explanation...")
     else
         print("Requesting code explanation...")

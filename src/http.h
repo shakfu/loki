@@ -51,11 +51,13 @@ void loki_http_cleanup(void);
  * @param headers Array of header strings ("Header: Value")
  * @param num_headers Number of headers
  * @param lua_callback Name of Lua function to call with response
+ * @param error_buf Buffer for the failure reason (optional)
+ * @param error_buf_size Size of error buffer
  * @return Request ID (>= 0) on success, -1 on failure
  */
 int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
                       const char *body, const char **headers, int num_headers,
-                      const char *lua_callback);
+                      const char *lua_callback, char *error_buf, size_t error_buf_size);
 
 /**
  * Poll for completed HTTP requests.
@@ -84,12 +86,16 @@ int loki_http_pending_count(void);
  */
 int loki_http_validate_url(const char *url, char *error_buf, size_t error_buf_size);
 
+struct sockaddr;
+/* Return 1 if a resolved address is loopback, private, link-local or reserved. */
+int loki_http_sockaddr_is_internal(const struct sockaddr *sa);
+
 /* Validate a single "Name: value" request header. Returns 1 if acceptable. */
 int loki_http_validate_header(const char *header, char *error_buf, size_t error_buf_size);
 
 /**
  * Lua API: loki.async_http(url, method, body, headers, callback)
- * Registers an async HTTP request.
+ * Returns a request id, or nil and an error message.
  */
 int lua_loki_async_http(lua_State *L);
 
