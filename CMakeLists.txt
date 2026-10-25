@@ -61,6 +61,7 @@ set(LOKI_SOURCES
     src/syntax.c
     src/languages.c
     src/search.c
+    src/bracket.c
     src/undo.c
     src/indent.c
     src/json.c
@@ -207,6 +208,7 @@ if(BUILD_TESTS)
         test_jsonrpc
         test_command_handlers
         test_lua_modules
+        test_bracket
     )
 
     foreach(test_name ${LOKI_TESTS})

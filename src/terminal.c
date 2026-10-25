@@ -295,21 +295,29 @@ failed:
     return -1;
 }
 
-/* Update window size and adjust screen layout */
-void terminal_update_window_size(editor_ctx_t *ctx) {
-    int rows, cols;
-    if (terminal_get_window_size(STDIN_FILENO, STDOUT_FILENO,
-                      &rows, &cols) == -1) {
-        /* If we can't get terminal size (e.g., non-interactive mode), use defaults */
-        rows = 24;
-        cols = 80;
+/* Terminal size, or 24x80 when it cannot be read (e.g. non-interactive). */
+void terminal_query_window_size(int *rows, int *cols) {
+    if (terminal_get_window_size(STDIN_FILENO, STDOUT_FILENO, rows, cols) == -1) {
+        *rows = 24;
+        *cols = 80;
     }
+}
+
+/* Set a context's screen size from the terminal's rows and cols. The text
+ * area gets every row except the status bar; the REPL takes its share in
+ * editor_update_repl_layout(). */
+void terminal_set_window_size(editor_ctx_t *ctx, int rows, int cols) {
     ctx->view.screencols = cols;
     rows -= STATUS_ROWS;
     if (rows < 1) rows = 1;
     ctx->view.screenrows_total = rows;
-    /* REPL layout update (editor_update_repl_layout) is in loki_editor.c */
-    ctx->view.screenrows = ctx->view.screenrows_total; /* Without REPL, use all available rows */
+    ctx->view.screenrows = rows;
+}
+
+void terminal_update_window_size(editor_ctx_t *ctx) {
+    int rows, cols;
+    terminal_query_window_size(&rows, &cols);
+    terminal_set_window_size(ctx, rows, cols);
 }
 
 /* ======================= Signal Handling ================================== */
@@ -320,29 +328,6 @@ void terminal_sig_winch_handler(int unused __attribute__((unused))) {
      * Just set a flag in the terminal host for main loop to handle. */
     if (g_terminal_host) {
         g_terminal_host->winsize_changed = 1;
-    }
-}
-
-/* Check and handle window resize */
-void terminal_handle_resize(editor_ctx_t *ctx) {
-    if (!ctx) return;
-
-    /* Check terminal host for resize flag (set by signal handler) */
-    if (terminal_host_resize_pending(g_terminal_host)) {
-        terminal_host_clear_resize(g_terminal_host);
-        terminal_update_window_size(ctx);
-        if (ctx->view.screenrows > 0 && ctx->view.cy >= ctx->view.screenrows)
-            ctx->view.cy = ctx->view.screenrows - 1;
-        if (ctx->view.screencols > 0 && ctx->view.cx >= ctx->view.screencols)
-            ctx->view.cx = ctx->view.screencols - 1;
-        if (ctx->view.cy < 0) ctx->view.cy = 0;
-        if (ctx->view.cx < 0) ctx->view.cx = 0;
-        /* Re-clamp the scroll offsets: shrinking the window could otherwise
-         * leave the view scrolled past the end of the buffer. */
-        if (ctx->view.rowoff > ctx->model.numrows - 1)
-            ctx->view.rowoff = ctx->model.numrows - 1;
-        if (ctx->view.rowoff < 0) ctx->view.rowoff = 0;
-        if (ctx->view.coloff < 0) ctx->view.coloff = 0;
     }
 }
 

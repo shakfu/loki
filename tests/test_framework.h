@@ -60,10 +60,12 @@ extern test_stats_t test_stats;
 
 #define ASSERT_FALSE(condition) ASSERT_TRUE(!(condition))
 
+/* Operands are evaluated once: many tests pass calls with side effects. */
 #define ASSERT_EQ(actual, expected) do { \
-    if ((actual) != (expected)) { \
-        printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected %d, got %d\n", \
-               __FILE__, __LINE__, (int)(expected), (int)(actual)); \
+    long long actual_ = (long long)(actual), expected_ = (long long)(expected); \
+    if (actual_ != expected_) { \
+        printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected %lld, got %lld\n", \
+               __FILE__, __LINE__, expected_, actual_); \
         test_stats.current_test_failed = 1; \
         test_stats.failed_tests++; \
         return; \
@@ -71,9 +73,10 @@ extern test_stats_t test_stats;
 } while(0)
 
 #define ASSERT_NEQ(actual, expected) do { \
-    if ((actual) == (expected)) { \
-        printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected not equal to %d\n", \
-               __FILE__, __LINE__, (int)(expected)); \
+    long long actual_ = (long long)(actual), expected_ = (long long)(expected); \
+    if (actual_ == expected_) { \
+        printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected not equal to %lld\n", \
+               __FILE__, __LINE__, expected_); \
         test_stats.current_test_failed = 1; \
         test_stats.failed_tests++; \
         return; \
@@ -81,9 +84,10 @@ extern test_stats_t test_stats;
 } while(0)
 
 #define ASSERT_PTR_EQ(actual, expected) do { \
-    if ((const void *)(actual) != (const void *)(expected)) { \
+    const void *actual_ = (const void *)(actual), *expected_ = (const void *)(expected); \
+    if (actual_ != expected_) { \
         printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected %p, got %p\n", \
-               __FILE__, __LINE__, (const void *)(expected), (const void *)(actual)); \
+               __FILE__, __LINE__, expected_, actual_); \
         test_stats.current_test_failed = 1; \
         test_stats.failed_tests++; \
         return; \
@@ -91,9 +95,10 @@ extern test_stats_t test_stats;
 } while(0)
 
 #define ASSERT_STR_EQ(actual, expected) do { \
-    if (strcmp((actual), (expected)) != 0) { \
+    const char *actual_ = (actual), *expected_ = (expected); \
+    if (strcmp(actual_, expected_) != 0) { \
         printf(COLOR_RED "  ✗ " COLOR_RESET "%s:%d: Expected \"%s\", got \"%s\"\n", \
-               __FILE__, __LINE__, (expected), (actual)); \
+               __FILE__, __LINE__, expected_, actual_); \
         test_stats.current_test_failed = 1; \
         test_stats.failed_tests++; \
         return; \

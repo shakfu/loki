@@ -37,15 +37,14 @@ int terminal_get_window_size(int ifd, int ofd, int *rows, int *cols);
  * Returns 0 on success, -1 on failure. */
 int terminal_get_cursor_position(int ifd, int ofd, int *rows, int *cols);
 
-/* Update editor context with current window size.
- * Adjusts screenrows/screencols and handles REPL layout.
- * Should be called on initialization and after SIGWINCH. */
-void terminal_update_window_size(editor_ctx_t *ctx);
+/* Terminal rows and cols, or 24x80 if they cannot be read. */
+void terminal_query_window_size(int *rows, int *cols);
 
-/* Check if window size changed and update if needed.
- * Reads the winsize_changed flag set by signal handler.
- * Safe to call in main loop (signal handler only sets flag). */
-void terminal_handle_resize(editor_ctx_t *ctx);
+/* Set ctx's screen size from terminal rows and cols, before REPL layout. */
+void terminal_set_window_size(editor_ctx_t *ctx, int rows, int cols);
+
+/* Query the terminal and set ctx's screen size. */
+void terminal_update_window_size(editor_ctx_t *ctx);
 
 /* ======================= Screen Buffer ==================================== */
 
@@ -61,7 +60,7 @@ void terminal_buffer_free(struct abuf *ab);
 /* ======================= Signal Handling ================================== */
 
 /* Signal handler for SIGWINCH (window size change).
- * Async-signal-safe: only sets a flag, actual handling in terminal_handle_resize().
+ * Async-signal-safe: only sets a flag, the main loop in editor.c applies the resize.
  * Should be registered with signal(SIGWINCH, terminal_sig_winch_handler). */
 void terminal_sig_winch_handler(int sig);
 

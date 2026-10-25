@@ -436,7 +436,7 @@ static void process_normal_mode(editor_ctx_t *ctx, int fd, int c) {
             /* Toggle REPL */
             if (ctx_repl(ctx)) {
                 ctx_repl(ctx)->active = !ctx_repl(ctx)->active;
-                editor_update_repl_layout(ctx);
+                editor_update_repl_layout_all(ctx);
                 if (ctx_repl(ctx)->active) {
                     editor_set_status_msg(ctx, "Lua REPL active (Ctrl-L or ESC to close)");
                 }
@@ -636,7 +636,7 @@ static void process_insert_mode(editor_ctx_t *ctx, int fd, int c) {
             /* Toggle REPL */
             if (ctx_repl(ctx)) {
                 ctx_repl(ctx)->active = !ctx_repl(ctx)->active;
-                editor_update_repl_layout(ctx);
+                editor_update_repl_layout_all(ctx);
                 if (ctx_repl(ctx)->active) {
                     editor_set_status_msg(ctx, "Lua REPL active (Ctrl-L or ESC to close)");
                 }

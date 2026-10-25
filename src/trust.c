@@ -6,6 +6,9 @@
  * the same directory match.
  */
 
+/* glibc declares realpath only with _DEFAULT_SOURCE or XSI; under the strict
+ * _POSIX_C_SOURCE set in CMake it was visible only via -O2 fortify headers. */
+#define _DEFAULT_SOURCE
 #include "trust.h"
 #include "loki.h"
 #include <errno.h>

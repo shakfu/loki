@@ -393,6 +393,8 @@ This is a fork with enhancements:
 
 - [x] **Auto-indentation** - Smart indent with bracket matching
 
+- [x] **Bracket match highlighting** - The bracket under the cursor and its pair are shown bold and underlined; an off-screen match shows its line number in the status bar
+
 **Dependencies:**
 - Lua or LuaJIT
 

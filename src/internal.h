@@ -361,6 +361,10 @@ void lua_repl_handle_keypress(editor_ctx_t *ctx, int key);
 void lua_repl_render(editor_ctx_t *ctx, struct abuf *ab);
 void lua_repl_append_log(editor_ctx_t *ctx, const char *line);
 void editor_update_repl_layout(editor_ctx_t *ctx);
+/* Apply REPL layout to ctx and every buffer sharing its REPL. */
+void editor_update_repl_layout_all(editor_ctx_t *ctx);
+/* Apply a terminal size (full rows and cols) to every buffer. */
+void editor_resize_buffers(int rows, int cols);
 
 /* Editor cleanup */
 void editor_cleanup_resources(editor_ctx_t *ctx);

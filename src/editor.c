@@ -64,16 +64,42 @@ void editor_update_repl_layout(editor_ctx_t *ctx) {
     }
     if (ctx->view.screenrows < 1) ctx->view.screenrows = 1;
 
+    /* Scroll rather than move the cursor: clamping cy alone put the cursor
+     * on a different file row. */
+    int filerow = ctx->view.rowoff + ctx->view.cy;
+    int filecol = ctx->view.coloff + ctx->view.cx;
     if (ctx->view.cy >= ctx->view.screenrows) {
         ctx->view.cy = ctx->view.screenrows - 1;
-        if (ctx->view.cy < 0) ctx->view.cy = 0;
+        ctx->view.rowoff = filerow - ctx->view.cy;
     }
-
-    if (ctx->model.numrows > ctx->view.screenrows && ctx->view.rowoff > ctx->model.numrows - ctx->view.screenrows) {
-        ctx->view.rowoff = ctx->model.numrows - ctx->view.screenrows;
-    }
-    if (ctx->model.numrows <= ctx->view.screenrows) {
+    if (ctx->model.numrows <= ctx->view.screenrows && filerow < ctx->view.screenrows) {
         ctx->view.rowoff = 0;
+        ctx->view.cy = filerow;
+    }
+    if (ctx->view.screencols > 0 && ctx->view.cx >= ctx->view.screencols) {
+        ctx->view.cx = ctx->view.screencols - 1;
+        ctx->view.coloff = filecol - ctx->view.cx;
+    }
+}
+
+void editor_update_repl_layout_all(editor_ctx_t *ctx) {
+    if (!ctx) return;
+    editor_update_repl_layout(ctx);
+    int ids[MAX_BUFFERS];
+    int n = buffer_get_list(ids);
+    for (int i = 0; i < n; i++) {
+        editor_ctx_t *b = buffer_get(ids[i]);
+        if (b != ctx && b->lua_host == ctx->lua_host) editor_update_repl_layout(b);
+    }
+}
+
+void editor_resize_buffers(int rows, int cols) {
+    int ids[MAX_BUFFERS];
+    int n = buffer_get_list(ids);
+    for (int i = 0; i < n; i++) {
+        editor_ctx_t *ctx = buffer_get(ids[i]);
+        terminal_set_window_size(ctx, rows, cols);
+        editor_update_repl_layout(ctx);
     }
 }
 
@@ -418,7 +444,13 @@ int loki_editor_main(int argc, char **argv) {
             exit(1);
         }
 
-        terminal_handle_resize(ctx);
+        /* Every buffer keeps its own copy of the screen size. */
+        if (terminal_host_resize_pending(g_terminal_host)) {
+            terminal_host_clear_resize(g_terminal_host);
+            int rows, cols;
+            terminal_query_window_size(&rows, &cols);
+            editor_resize_buffers(rows, cols);
+        }
 
         /* Check live loops for beat boundary triggers (pushes events to queue) */
         live_loop_tick();

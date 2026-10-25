@@ -7,6 +7,7 @@
 #include "loki/core.h"
 #include "internal.h"
 #include "buffers.h"
+#include "modal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -281,6 +282,102 @@ TEST(buffer_create_inherits_word_wrap) {
     buffers_free();
 }
 
+/* Test: a resize reaches every buffer, not only the current one */
+TEST(buffer_resize_applies_to_all_buffers) {
+    editor_ctx_t ctx;
+    init_test_context(&ctx);
+    buffers_init(&ctx);
+    int first = buffer_get_current_id();
+    int second = buffer_create(NULL);
+    buffer_switch(second);
+
+    editor_resize_buffers(30, 100);
+
+    int ids[] = {first, second};
+    for (int i = 0; i < 2; i++) {
+        editor_ctx_t *b = buffer_get(ids[i]);
+        ASSERT_EQ(b->view.screencols, 100);
+        ASSERT_EQ(b->view.screenrows_total, 30 - STATUS_ROWS);
+        ASSERT_EQ(b->view.screenrows, 30 - STATUS_ROWS);
+    }
+
+    buffers_free();
+}
+
+/* Test: an open REPL keeps its rows after a resize */
+TEST(buffer_resize_keeps_repl_rows) {
+    LuaHost host;
+    memset(&host, 0, sizeof(host));
+    host.repl.active = 1;
+    editor_ctx_t ctx;
+    init_test_context(&ctx);
+    ctx.lua_host = &host;
+    buffers_init(&ctx);
+    int other = buffer_create(NULL);
+
+    editor_resize_buffers(40, 80);
+
+    ASSERT_EQ(buffer_get_current()->view.screenrows,
+              40 - STATUS_ROWS - LUA_REPL_TOTAL_ROWS);
+    ASSERT_EQ(buffer_get(other)->view.screenrows,
+              40 - STATUS_ROWS - LUA_REPL_TOTAL_ROWS);
+
+    buffers_free();
+}
+
+/* Test: shrinking scrolls so the cursor stays on the same file position */
+TEST(buffer_resize_keeps_cursor_position) {
+    editor_ctx_t ctx;
+    init_test_context(&ctx);
+    buffers_init(&ctx);
+    editor_ctx_t *b = buffer_get_current();
+    for (int i = 0; i < 50; i++) editor_insert_row(b, i, "0123456789", 10);
+    editor_resize_buffers(40, 80);
+    b->view.rowoff = 10;
+    b->view.cy = 20;          /* file row 30 */
+    b->view.cx = 70;          /* file col 70 */
+
+    editor_resize_buffers(12, 40);  /* 10 text rows */
+
+    ASSERT_EQ(b->view.cy, 9);
+    ASSERT_EQ(b->view.rowoff + b->view.cy, 30);
+    ASSERT_EQ(b->view.cx, 39);
+    ASSERT_EQ(b->view.coloff + b->view.cx, 70);
+
+    editor_resize_buffers(60, 80);  /* whole file fits: scroll to top */
+    ASSERT_EQ(b->view.rowoff, 0);
+    ASSERT_EQ(b->view.cy, 30);
+
+    buffers_free();
+}
+
+/* Test: opening or closing the shared REPL resizes every buffer's text area */
+TEST(buffer_repl_toggle_applies_to_all_buffers) {
+    LuaHost host;
+    memset(&host, 0, sizeof(host));
+    editor_ctx_t ctx;
+    init_test_context(&ctx);
+    ctx.lua_host = &host;
+    buffers_init(&ctx);
+    int first = buffer_get_current_id();
+    int second = buffer_create(NULL);
+    editor_resize_buffers(40, 80);
+    int full = 40 - STATUS_ROWS;
+
+    modal_process_normal_mode_key(buffer_get_current(), 0, CTRL_L);  /* open */
+    ASSERT_TRUE(host.repl.active);
+    ASSERT_EQ(buffer_get(first)->view.screenrows, full - LUA_REPL_TOTAL_ROWS);
+    ASSERT_EQ(buffer_get(second)->view.screenrows, full - LUA_REPL_TOTAL_ROWS);
+
+    buffer_switch(second);
+    lua_repl_handle_keypress(buffer_get_current(), ESC);             /* close */
+    ASSERT_FALSE(host.repl.active);
+    ASSERT_EQ(buffer_get(first)->view.screenrows, full);
+    ASSERT_EQ(buffer_get(second)->view.screenrows, full);
+
+    buffers_free();
+}
+
 BEGIN_TEST_SUITE("Buffer Management")
     RUN_TEST(buffer_init);
     RUN_TEST(buffer_create);
@@ -294,4 +391,8 @@ BEGIN_TEST_SUITE("Buffer Management")
     RUN_TEST(buffer_tabs_rendering);
     RUN_TEST(buffer_create_nonexistent_file);
     RUN_TEST(buffer_create_inherits_word_wrap);
+    RUN_TEST(buffer_resize_applies_to_all_buffers);
+    RUN_TEST(buffer_resize_keeps_repl_rows);
+    RUN_TEST(buffer_resize_keeps_cursor_position);
+    RUN_TEST(buffer_repl_toggle_applies_to_all_buffers);
 END_TEST_SUITE()

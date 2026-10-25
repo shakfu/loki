@@ -6,6 +6,12 @@
 
 ## Medium
 
-- Decide where per-window view state lives (cursor, scroll, wrap, line-number mode) before adding split windows or relative numbers.
+- Decide where per-window view state lives. Options, measurements and a recommendation are in `docs/dev/window-state.md`.
+
+- `word_wrap` cuts each line at a word boundary and drops the rest. Each file row still takes one screen row (`core.c:867`).
 
 ## Low
+
+- `editor_select_syntax_highlight()` is declared in `include/loki/core.h:157` but never defined.
+
+- Loopback HTTP proxies fail unless `LOKI_HTTP_ALLOW_INTERNAL` is set: the connect-time check sees the proxy address. Kept as the default (2026-10-25) because exempting the proxy needs curl to report which connection is the proxy. Revisit if someone needs a local proxy.

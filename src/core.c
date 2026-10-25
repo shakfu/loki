@@ -41,6 +41,7 @@ see LICENSE.
 #include "buffers.h"
 #include "syntax.h"
 #include "indent.h"
+#include "bracket.h"
 #include "lang_bridge.h"
 
 void editor_set_status_msg(editor_ctx_t *ctx, const char *fmt, ...) {
@@ -817,6 +818,20 @@ void editor_refresh_screen(editor_ctx_t *ctx) {
     int text_cols = ctx->view.screencols - gutter_width;
     if (text_cols < 1) text_cols = 1;
 
+    /* Bracket under the cursor and its match, in render columns. */
+    int br_row = -1, br_col = -1, bm_row = -1, bm_col = -1;
+    {
+        int cur_row = ctx->view.rowoff + ctx->view.cy;
+        int cur_col = ctx->view.coloff + ctx->view.cx;
+        int mr, mc;
+        if (bracket_find_match(ctx, cur_row, cur_col, &mr, &mc)) {
+            br_row = cur_row;
+            br_col = bracket_render_col(&ctx->model.row[cur_row], cur_col);
+            bm_row = mr;
+            bm_col = bracket_render_col(&ctx->model.row[mr], mc);
+        }
+    }
+
     for (y = 0; y < available_rows; y++) {
         int filerow = ctx->view.rowoff+y;
 
@@ -885,6 +900,10 @@ void editor_refresh_screen(editor_ctx_t *ctx) {
             int j;
             for (j = 0; j < len; j++) {
                 int selected = is_selected(ctx, filerow, ctx->view.coloff + j);
+                int rcol = ctx->view.coloff + j;
+                int bracket = (filerow == br_row && rcol == br_col) ||
+                              (filerow == bm_row && rcol == bm_col);
+                if (bracket) terminal_buffer_append(&ab,"\x1b[1;4m",6); /* Bold underline */
 
                 /* Apply selection background */
                 if (selected) {
@@ -932,6 +951,7 @@ void editor_refresh_screen(editor_ctx_t *ctx) {
                         }
                     }
                 }
+                if (bracket) terminal_buffer_append(&ab,"\x1b[22;24m",8);
             }
         }
         terminal_buffer_append(&ab,"\x1b[39m",5);
@@ -977,8 +997,12 @@ void editor_refresh_screen(editor_ctx_t *ctx) {
 
     /* Show playing indicator if any language is playing */
     const char *playing = loki_lang_is_playing(ctx) ? "[PLAYING] " : "";
+    /* Report a bracket match that is scrolled out of view. */
+    char match_buf[24] = "";
+    if (bm_row >= 0 && (bm_row < ctx->view.rowoff || bm_row >= ctx->view.rowoff + available_rows))
+        snprintf(match_buf, sizeof(match_buf), "match %d  ", bm_row + 1);
     int rlen = snprintf(rstatus, sizeof(rstatus),
-        "%s%d/%d", playing, ctx->view.rowoff+ctx->view.cy+1, ctx->model.numrows);
+        "%s%s%d/%d", playing, match_buf, ctx->view.rowoff+ctx->view.cy+1, ctx->model.numrows);
     if (len > ctx->view.screencols) len = ctx->view.screencols;
     terminal_buffer_append(&ab,status,len);
     while(len < ctx->view.screencols) {

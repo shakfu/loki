@@ -12,7 +12,7 @@ The codebase includes:
 
 - Terminal input and rendering, modal editing, multiple buffers/tabs, selection, line numbers, and word wrapping.
 
-- Literal incremental search, basic current-line substitution, undo/redo, and automatic indentation with electric dedent.
+- Literal incremental search, basic current-line substitution, undo/redo, automatic indentation with electric dedent, and matching-bracket highlighting.
 
 - Lua configuration and editor APIs, a REPL, Lua modules, and dynamic language registration.
 
@@ -59,12 +59,6 @@ The following items are proposals and are not represented as completed features.
 - Distinguish the current line number visually.
 
 - Expose settings through a command and Lua/config API.
-
-#### Bracket matching
-
-- Highlight matching `()`, `{}`, and `[]` when the cursor is on a bracket.
-
-- Support nested and multi-line pairs, and report off-screen matches in the status area.
 
 ### Mid term
 

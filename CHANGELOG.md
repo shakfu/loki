@@ -34,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Added
 
+- **Matching-bracket highlighting**: with the cursor on `(`, `)`, `[`, `]`, `{` or `}`, the bracket and its pair are shown bold and underlined. A match outside the visible rows shows as `match <line>` in the status bar. Brackets in strings and comments are skipped unless the cursor bracket is in one. The scan stops after 1000 rows in each direction (`BRACKET_MAX_SCAN_ROWS`). At that limit an unmatched bracket adds about 60-85 us per frame; an unbounded scan would grow with file size.
+
 - **`make test-http`** builds with `-DLOKI_ENABLE_HTTP=ON` in `build/http` and runs the full suite, including the HTTP tests. CI now runs every OS and build type with HTTP both off and on.
 
 - **Tests for the code shared with psnd**: `test_json`, `test_jsonrpc` and `test_command_handlers` are ported from psnd. psnd's regression tests for terminal input, selection, indent, commands, buffers, modal keys and session resize are added to the matching loki suites.
@@ -51,6 +53,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - **`:w`, `:e`, `:wq` and `:x` take the rest of the line** (`max_args` -1), so paths with spaces pass the argument-count check added in 0.5.1.
 
 ### Fixed
+
+- **Terminal resize reaches every buffer**: each buffer keeps its own copy of the screen size, and a resize updated only the current one. Switching to another buffer afterwards drew it at the old size. Resize also ignored an open REPL, so the text area overlapped it until the REPL was toggled. When the text area shrinks, the view now scrolls to keep the cursor on its file row and column; before, the cursor was clamped onto a different row. Opening the REPL uses the same rule.
+
+- **REPL toggle resizes every buffer**: the REPL is shared, but opening or closing it updated only the current buffer's layout. After a switch, another buffer used the full height and overlapped the open REPL.
+
+- **`realpath` undeclared in Debug builds**: under CMake's `_POSIX_C_SOURCE`, glibc declares `realpath` only through the `-O2` fortify headers. Debug builds of `src/trust.c` treated its pointer result as `int`, and GCC 14 rejects the call outright. `trust.c` now defines `_DEFAULT_SOURCE`, as `http.c` does.
 
 - **Bundled HTTP modules**: the `test.http` and `example.fetch_quote` callbacks treated the response as a string. It is a table, so both raised an error on every response. `ai`, `example` and `test` also reported "request sent" when `loki.async_http()` rejected the request; they now show its error message. `test_lua_modules` loads the modules against the real `loki` API with a stubbed `loki.async_http`.
 

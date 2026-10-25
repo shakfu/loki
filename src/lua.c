@@ -1949,7 +1949,7 @@ static int lua_repl_handle_builtin(editor_ctx_t *ctx, const char *cmd, size_t le
     if (lua_repl_iequals(cmd, len, "exit") || lua_repl_iequals(cmd, len, "quit")) {
         t_lua_repl *repl = ctx_repl(ctx);
         if (repl) repl->active = 0;
-        editor_update_repl_layout(ctx);
+        editor_update_repl_layout_all(ctx);
         editor_set_status_msg(ctx, "Lua REPL closed");
         return 1;
     }
@@ -2101,7 +2101,7 @@ void lua_repl_handle_keypress(editor_ctx_t *ctx, int key) {
     case ESC:
     case CTRL_C:
         repl->active = 0;
-        editor_update_repl_layout(ctx);
+        editor_update_repl_layout_all(ctx);
         editor_set_status_msg(ctx, "Lua REPL closed");
         return;
     case CTRL_U:
@@ -2141,7 +2141,7 @@ void lua_repl_handle_keypress(editor_ctx_t *ctx, int key) {
     case ENTER:
         lua_repl_execute_current(ctx);
         if (!repl->active) {
-            editor_update_repl_layout(ctx);
+            editor_update_repl_layout_all(ctx);
         }
         return;
     case TAB:
