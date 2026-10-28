@@ -292,6 +292,7 @@ static const char *check_private_dir(const char *dir) {
         if (mkdir(dir, 0700) != 0 && errno != EEXIST) return strerror(errno);
         if (lstat(dir, &st) != 0) return strerror(errno);
     }
+    if (S_ISLNK(st.st_mode)) return "socket directory is a symlink";
     if (!S_ISDIR(st.st_mode)) return "socket directory is not a directory";
     if (st.st_uid != geteuid()) return "socket directory is owned by another user";
     if (st.st_mode & 077) return "socket directory is accessible to other users";

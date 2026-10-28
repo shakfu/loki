@@ -162,10 +162,12 @@ TEST(lines_splits_and_joins_chunks) {
 
 TEST(listen_refuses_insecure_paths) {
     ASSERT_LUA(L,
-        "local s, err = loki.listen{path = '/tmp/loki-test.sock'}\n"
+        "local s, err = loki.listen{path = '/usr/loki-test.sock'}\n"
         "assert(s == nil and err:find('another user'), tostring(err))\n"
         "s, err = loki.listen{path = dir .. '/shared/x.sock'}\n"
         "assert(s == nil and err:find('other users'), tostring(err))\n"
+        "s, err = loki.listen{path = dir .. '/privlink/x.sock'}\n"
+        "assert(s == nil and err:find('symlink'), tostring(err))\n"
         "s, err = loki.listen{path = dir .. '/src.txt'}\n"
         "assert(s == nil, 'listen over a regular file')\n"
         "s, err = loki.listen{path = dir .. '/' .. string.rep('x', 200)}\n"
@@ -233,6 +235,10 @@ BEGIN_TEST_SUITE("MCP server")
     if (symlink("/etc", path) != 0) return 1;
     snprintf(path, sizeof(path), "%s/shared", dir);
     if (mkdir(path, 0755) != 0 || chmod(path, 0755) != 0) return 1;
+    snprintf(path, sizeof(path), "%s/priv", dir);
+    if (mkdir(path, 0700) != 0) return 1;
+    snprintf(path, sizeof(path), "%s/privlink", dir);
+    if (symlink("priv", path) != 0) return 1;
 
     editor_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));

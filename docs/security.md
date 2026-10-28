@@ -477,7 +477,7 @@ The regression tests are in `tests/test_http_security.c`. Run them with `make te
 
 `:mcp` listens on a Unix socket, so other processes can read and edit buffers.
 
-- **Who can connect:** the socket's directory must be owned by the user and have no group or other permissions. `loki.listen` creates it with mode 0700 and refuses an existing directory that fails these checks. A directory pre-created in `/tmp` by another user is refused, so only the user and root can connect.
+- **Who can connect:** the socket's directory must be owned by the user and have no group or other permissions. `loki.listen` creates it with mode 0700 and refuses an existing directory that fails these checks, or is a symlink. A directory pre-created in `/tmp` by another user is refused, so only the user and root can connect.
 - **What a client can do:**
   - read every open buffer;
   - replace text in open buffers inside the start directory;
