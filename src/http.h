@@ -65,8 +65,9 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
  * Invokes Lua callbacks for completed requests.
  *
  * @param L Lua state for callbacks
+ * @return Number of requests that completed (callbacks invoked)
  */
-void loki_http_poll(lua_State *L);
+int loki_http_poll(lua_State *L);
 
 /**
  * Get number of pending HTTP requests.

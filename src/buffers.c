@@ -21,6 +21,7 @@ typedef struct {
     int id;                 /* Unique buffer ID */
     int active;             /* 1 if this slot is in use, 0 if free */
     char display_name[64];  /* Cached display name for tabs */
+    int scratch;            /* never dirty; display_name is fixed */
 } buffer_entry_t;
 
 /* Global buffer state */
@@ -57,7 +58,7 @@ static buffer_entry_t *find_free_slot(void) {
 
 /* Update display name for buffer */
 static void update_display_name(buffer_entry_t *buf) {
-    if (!buf) return;
+    if (!buf || buf->scratch) return;
 
     if (buf->ctx.model.filename && buf->ctx.model.filename[0] != '\0') {
         /* Extract basename from path */
@@ -170,6 +171,7 @@ int buffer_create(const char *filename) {
     /* Initialize new buffer */
     buf->active = 1;
     buf->id = buffer_state.next_id++;
+    buf->scratch = 0;  /* the slot may have held a scratch buffer */
 
     /* Initialize editor context */
     editor_ctx_init(&buf->ctx);
@@ -380,6 +382,20 @@ int buffer_get_list(int *ids) {
 const char *buffer_get_display_name(int buffer_id) {
     buffer_entry_t *buf = find_buffer(buffer_id);
     return buf ? buf->display_name : NULL;
+}
+
+int buffer_set_scratch(int buffer_id, const char *name) {
+    buffer_entry_t *buf = find_buffer(buffer_id);
+    if (!buf) return -1;
+    buf->scratch = 1;
+    buf->ctx.model.dirty = 0;
+    snprintf(buf->display_name, sizeof(buf->display_name), "%s", name);
+    return 0;
+}
+
+int buffer_is_scratch(int buffer_id) {
+    buffer_entry_t *buf = find_buffer(buffer_id);
+    return buf ? buf->scratch : 0;
 }
 
 int buffer_is_modified(int buffer_id) {

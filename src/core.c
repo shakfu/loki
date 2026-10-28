@@ -42,6 +42,7 @@ see LICENSE.
 #include "syntax.h"
 #include "indent.h"
 #include "bracket.h"
+#include "choice.h"
 #include "lang_bridge.h"
 
 void editor_set_status_msg(editor_ctx_t *ctx, const char *fmt, ...) {
@@ -1022,8 +1023,11 @@ void editor_refresh_screen(editor_ctx_t *ctx) {
 
     /* Second row depends on ctx->view.statusmsg and the status message update time. */
     terminal_buffer_append(&ab,"\x1b[0K",4);
-    int msglen = strlen(ctx->view.statusmsg);
-    if (msglen && time(NULL)-ctx->view.statusmsg_time < 5)
+    const char *pending = choice_prompt();  /* a question stays until answered */
+    int msglen = (int)strlen(pending ? pending : ctx->view.statusmsg);
+    if (pending)
+        terminal_buffer_append(&ab,pending,msglen <= ctx->view.screencols ? msglen : ctx->view.screencols);
+    else if (msglen && time(NULL)-ctx->view.statusmsg_time < 5)
         terminal_buffer_append(&ab,ctx->view.statusmsg,msglen <= ctx->view.screencols ? msglen : ctx->view.screencols);
 
     /* Render REPL if active */

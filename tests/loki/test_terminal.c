@@ -9,6 +9,7 @@
  * cannot be easily unit tested and are tested through integration tests.
  */
 
+#define _XOPEN_SOURCE 700  /* posix_openpt, grantpt, unlockpt, ptsname */
 #include "test_framework.h"
 #include "loki/core.h"
 #include "internal.h"
@@ -16,6 +17,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <time.h>
 
 /* ============================================================================
  * Screen Buffer Tests
@@ -352,6 +358,67 @@ TEST(read_key_returns_minus_one_on_error) {
     ASSERT_EQ(terminal_read_key(-1), -1);
 }
 
+/* Open a pty and put its slave in the editor's raw mode (VMIN=0, VTIME=1),
+ * so reads time out every 100 ms as on a real terminal. Returns the slave fd
+ * and stores the master in *master, or -1. */
+static int raw_pty(int *master) {
+    int m = posix_openpt(O_RDWR | O_NOCTTY);
+    if (m < 0) return -1;
+    if (grantpt(m) != 0 || unlockpt(m) != 0) { close(m); return -1; }
+    int s = open(ptsname(m), O_RDWR | O_NOCTTY);
+    if (s < 0) { close(m); return -1; }
+    struct termios t;
+    tcgetattr(s, &t);
+    t.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    t.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    t.c_cc[VMIN] = 0;
+    t.c_cc[VTIME] = 1;
+    tcsetattr(s, TCSANOW, &t);
+    *master = m;
+    return s;
+}
+
+static int idle_calls;
+static int idle_master;
+
+/* Types a key on the second idle tick, so the read can only end through it. */
+static void type_on_second_idle(void) {
+    if (++idle_calls == 2 && write(idle_master, "k", 1) != 1) idle_calls = -1;
+}
+
+TEST(read_key_idle_runs_hook_while_waiting) {
+    int slave = raw_pty(&idle_master);
+    ASSERT_TRUE(slave >= 0);
+    idle_calls = 0;
+    terminal_set_idle_hook(type_on_second_idle);
+    ASSERT_EQ(terminal_read_key_idle(slave), 'k');
+    ASSERT_EQ(idle_calls, 2);
+    terminal_set_idle_hook(NULL);
+    close(slave);
+    close(idle_master);
+}
+
+/* Nested prompts read with terminal_read_key; it must never run idle work. */
+TEST(read_key_plain_skips_idle_hook) {
+    int master;
+    int slave = raw_pty(&master);
+    ASSERT_TRUE(slave >= 0);
+    pid_t pid = fork();
+    ASSERT_TRUE(pid >= 0);
+    if (pid == 0) {  /* type after at least two read timeouts */
+        nanosleep(&(struct timespec){0, 250 * 1000 * 1000}, NULL);
+        _exit(write(master, "k", 1) == 1 ? 0 : 1);
+    }
+    idle_calls = 0;
+    terminal_set_idle_hook(type_on_second_idle);
+    ASSERT_EQ(terminal_read_key(slave), 'k');
+    ASSERT_EQ(idle_calls, 0);
+    terminal_set_idle_hook(NULL);
+    waitpid(pid, NULL, 0);
+    close(slave);
+    close(master);
+}
+
 BEGIN_TEST_SUITE("Terminal Buffer Operations")
     /* Basic buffer operations */
     RUN_TEST(terminal_buffer_init);
@@ -389,4 +456,6 @@ BEGIN_TEST_SUITE("Terminal Buffer Operations")
     RUN_TEST(read_key_known_sequence);
     RUN_TEST(read_key_returns_minus_one_on_closed_input);
     RUN_TEST(read_key_returns_minus_one_on_error);
+    RUN_TEST(read_key_idle_runs_hook_while_waiting);
+    RUN_TEST(read_key_plain_skips_idle_hook);
 END_TEST_SUITE()

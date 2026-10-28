@@ -148,9 +148,15 @@ static int input_closed(int fd) {
     return poll(&p, 1, 0) > 0 && (p.revents & (POLLHUP | POLLERR | POLLNVAL));
 }
 
+static void (*idle_hook)(void);
+
+void terminal_set_idle_hook(void (*fn)(void)) {
+    idle_hook = fn;
+}
+
 /* Read a key from the terminal put in raw mode, trying to handle
  * escape sequences. Returns -1 on a read error or closed input. */
-int terminal_read_key(int fd) {
+static int read_key(int fd, int idle) {
     int nread;
     char c, seq[6];
     /* Raw mode sets VMIN=0/VTIME=1, so read() returns 0 on every 100 ms
@@ -159,6 +165,7 @@ int terminal_read_key(int fd) {
     while ((nread = read(fd, &c, 1)) != 1) {
         if (nread == 0) {
             if (input_closed(fd)) return -1;
+            if (idle && idle_hook) idle_hook();
             continue;
         }
         if (errno == EINTR || errno == EAGAIN) continue;
@@ -231,6 +238,14 @@ int terminal_read_key(int fd) {
         default:
             return c;
     }
+}
+
+int terminal_read_key(int fd) {
+    return read_key(fd, 0);
+}
+
+int terminal_read_key_idle(int fd) {
+    return read_key(fd, 1);
 }
 
 /* ======================= Window Size Detection ============================ */

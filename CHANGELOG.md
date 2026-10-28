@@ -36,6 +36,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 - **Matching-bracket highlighting**: with the cursor on `(`, `)`, `[`, `]`, `{` or `}`, the bracket and its pair are shown bold and underlined. A match outside the visible rows shows as `match <line>` in the status bar. Brackets in strings and comments are skipped unless the cursor bracket is in one. The scan stops after 1000 rows in each direction (`BRACKET_MAX_SCAN_ROWS`). At that limit an unmatched bracket adds about 60-85 us per frame; an unbounded scan would grow with file size.
 
+- **`loki.json`**: `encode`, `decode`, `null` and `array`, built on `src/json.c` rather than a second JSON library. `encode` replaces invalid UTF-8 with U+FFFD, so its output is always valid JSON.
+
+- **Lua API for any buffer**: `loki.buffers`, `buffer_text`, `buffer_replace`, `buffer_find`, `buffer_new`, `buffer_save`, `open` and `get_selection`. Lines and columns are 1-based. `buffer_replace` takes byte offsets into `buffer_text`, so `string.find` results pass straight through. A replace is one undo step: a new `UNDO_INSERT_BLOCK` pairs with the existing block delete. Without a group break before it, undo also removed the user's preceding keystrokes. `buffer_new` creates a scratch buffer, which never counts as unsaved.
+
+- **`loki.spawn`**: runs a child process with non-blocking stdin, stdout and stderr, delivered to Lua callbacks from the idle hook. Children start in a new session, so a child that prompts on `/dev/tty` fails instead of reading the editor's keys. loki ignores SIGPIPE so that writing to an exited child returns EPIPE. `LUA_SANDBOX` builds omit it, since it would restore what removing `io.popen` takes away. Design record: [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md).
+
+- **MCP server (`:mcp`)**: agents can read loki's open buffers, including unsaved edits, and edit them. Edits are one undo step each and are never saved. The transport is a Unix socket in a directory only the user can access. Agents launch `loki --mcp-shim` as their stdio server, because loki's own stdio is the terminal. A local HTTP server was the alternative; MCP requires `Origin` checks for it, and it would expose more. The server handles both the `2026-07-28` per-request versioning and the older `initialize` handshake. New Lua APIs: `loki.listen`, `loki.socket_path`, `loki.abspath` and `loki.exepath`, plus the `jsonrpc` and `mcp` modules. See [`docs/security.md`](docs/security.md#agent-integration-mcp).
+
+- **ACP client (`:agent`)**: runs a coding agent over the [Agent Client Protocol](https://agentclientprotocol.com) and streams its replies into a scratch `*agent*` buffer. The default agent is `myra --acp`; set `acp.command` in `init.lua` to change it. The agent's file reads see unsaved buffers. Its writes replace an open buffer as one undo step and then save it, because the spec requires writes to create files and the agent's own tools read the disk. Permission requests use a new one-key prompt on the message line (`loki.choose`). While it waits, other keys are swallowed, so a keystroke meant as an answer cannot edit the buffer. When `:mcp` is running, the agent also gets loki's MCP server in `session/new`.
+
 - **`make test-http`** builds with `-DLOKI_ENABLE_HTTP=ON` in `build/http` and runs the full suite, including the HTTP tests. CI now runs every OS and build type with HTTP both off and on.
 
 - **Tests for the code shared with psnd**: `test_json`, `test_jsonrpc` and `test_command_handlers` are ported from psnd. psnd's regression tests for terminal input, selection, indent, commands, buffers, modal keys and session resize are added to the matching loki suites.
@@ -62,7 +72,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 - **`:w`, `:e`, `:wq` and `:x` take the rest of the line** (`max_args` -1), so paths with spaces pass the argument-count check added in 0.5.1.
 
+### Removed
+
+- **`.loki/modules/ai.lua`** (`ai.complete`, `ai.explain` and the `ai_complete`/`ai_explain` aliases): `:agent` replaces it. It sent one hardcoded OpenAI request and could never have worked in the editor, since `loki.async_http` callbacks did not fire. `loki.async_http` stays for other uses.
+
 ### Fixed
+
+- **JSON parser drops data**: `\uXXXX` escapes became `?`, so non-ASCII text from any JSON peer was lost. Fractions and exponents were truncated to `int`, and larger integers saturated. Escapes now decode to UTF-8, with surrogate pairs joined and lone surrogates mapped to U+FFFD. Such numbers parse as `JSON_DOUBLE`. `json_object_get_int` still truncates them, so `jsonrpc.c` behaves as before. `json_key` now escapes keys.
+
+- **Background work runs without a keypress**: the key read retried each 100 ms timeout internally, so async events, resizes and redraws waited for the next key. Nothing in the editor called `loki_http_poll`, so `loki.async_http` callbacks never fired. Idle timeouts in the top-level key read now run that work and redraw if any ran. Nested prompts such as search skip it, because search keeps pointers into row highlight data that a callback could free.
 
 - **Terminal resize reaches every buffer**: each buffer keeps its own copy of the screen size, and a resize updated only the current one. Switching to another buffer afterwards drew it at the old size. Resize also ignored an open REPL, so the text area overlapped it until the REPL was toggled. When the text area shrinks, the view now scrolls to keep the cursor on its file row and column; before, the cursor was clamped onto a different row. Opening the REPL uses the same rule.
 

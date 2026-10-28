@@ -43,19 +43,17 @@ if MODE == "editor" then
     -- Editor utilities
     editor = require("editor")
 
+    -- :mcp starts the MCP server so an agent can read and edit buffers
+    if loki.listen then require("mcp").register_command() end
+    -- :agent <prompt> runs an ACP agent (acp.command, default myra --acp)
+    if loki.spawn then require("acp").register_command() end
+
     -- Backward compatibility aliases (deprecated)
     count_lines = editor.count_lines
     show_cursor = editor.cursor
     insert_timestamp = editor.timestamp
     first_line = editor.first_line
 end
-
--- AI functions (available in both editor and REPL)
-ai = require("ai")
-
--- Backward compatibility aliases (deprecated)
-ai_complete = ai.complete
-ai_explain = ai.explain
 
 -- Test/demo functions
 test = require("test")

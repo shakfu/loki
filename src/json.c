@@ -100,11 +100,16 @@ void json_array_end(JsonBuilder *jb) {
     jb->need_comma = 1;
 }
 
+static void json_escape_string(JsonBuilder *jb, const char *s, size_t len);
+
 void json_key(JsonBuilder *jb, const char *key) {
+    json_key_len(jb, key, strlen(key));
+}
+
+void json_key_len(JsonBuilder *jb, const char *key, size_t len) {
     json_maybe_comma(jb);
-    json_append_str(jb, "\"");
-    json_append_str(jb, key);
-    json_append_str(jb, "\":");
+    json_escape_string(jb, key, len);
+    json_append_str(jb, ":");
 }
 
 /* Escape special characters in string */
@@ -162,6 +167,26 @@ void json_int(JsonBuilder *jb, int value) {
     snprintf(buf, sizeof(buf), "%d", value);
     json_append_str(jb, buf);
     jb->need_comma = 1;
+}
+
+void json_int64(JsonBuilder *jb, long long value) {
+    json_maybe_comma(jb);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", value);
+    json_append_str(jb, buf);
+    jb->need_comma = 1;
+}
+
+int json_double(JsonBuilder *jb, double value) {
+    if (value != value || value - value != 0) return -1;  /* NaN, inf */
+    json_maybe_comma(jb);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.17g", value);
+    /* Keep it a double on the way back: "1e+20" and "1.5" already are. */
+    if (!strpbrk(buf, ".eE")) strcat(buf, ".0");
+    json_append_str(jb, buf);
+    jb->need_comma = 1;
+    return 0;
 }
 
 void json_bool(JsonBuilder *jb, int value) {
@@ -228,29 +253,80 @@ static int expect(JsonParser *p, char c) {
 
 static JsonValue parse_value(JsonParser *p);
 
+/* Parse 4 hex digits at p->pos into *out. Returns 0 if they are not there. */
+static int parse_hex4(JsonParser *p, unsigned *out) {
+    unsigned v = 0;
+    for (int i = 0; i < 4; i++) {
+        if (p->pos >= p->len) return 0;
+        int c = (unsigned char)p->json[p->pos++];
+        v <<= 4;
+        if (c >= '0' && c <= '9') v |= (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') v |= (unsigned)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') v |= (unsigned)(c - 'A' + 10);
+        else return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+/* Write code point cp as UTF-8; returns bytes written (1-4). */
+static size_t utf8_encode(unsigned cp, char *out) {
+    if (cp < 0x80) { out[0] = (char)cp; return 1; }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+/* Decode \uXXXX (p->pos just past the 'u'), joining surrogate pairs. A lone
+ * surrogate becomes U+FFFD, since it has no UTF-8 encoding. Returns the code
+ * point, or -1 on malformed hex. */
+static long parse_unicode_escape(JsonParser *p) {
+    unsigned hi;
+    if (!parse_hex4(p, &hi)) return -1;
+    if (hi < 0xD800 || hi > 0xDFFF) return (long)hi;
+    if (hi >= 0xDC00) return 0xFFFD;  /* low surrogate first */
+    if (p->pos + 1 < p->len && p->json[p->pos] == '\\' && p->json[p->pos + 1] == 'u') {
+        size_t save = p->pos;
+        unsigned lo;
+        p->pos += 2;
+        if (!parse_hex4(p, &lo)) return -1;
+        if (lo >= 0xDC00 && lo <= 0xDFFF)
+            return 0x10000 + (((long)hi - 0xD800) << 10) + ((long)lo - 0xDC00);
+        p->pos = save;  /* not a pair: decode the next escape on its own */
+    }
+    return 0xFFFD;
+}
+
 static JsonValue parse_string(JsonParser *p) {
     JsonValue result = { .type = JSON_ERROR };
 
     if (!expect(p, '"')) return result;
 
     size_t start = p->pos;
-    size_t len = 0;
 
-    /* First pass: count length */
+    /* First pass: find the closing quote. Decoding never lengthens the
+     * input (\uXXXX is 6 bytes for at most 3; a pair is 12 for 4), so the
+     * span length bounds the output. */
     while (p->pos < p->len && p->json[p->pos] != '"') {
-        if (p->json[p->pos] == '\\' && p->pos + 1 < p->len) {
-            p->pos += 2;
-            len++;
-        } else {
-            p->pos++;
-            len++;
-        }
+        p->pos += (p->json[p->pos] == '\\' && p->pos + 1 < p->len) ? 2 : 1;
     }
 
     if (p->pos >= p->len) return result;
 
-    /* Allocate and copy */
-    char *str = malloc(len + 1);
+    char *str = malloc(p->pos - start + 1);
     if (!str) return result;
 
     p->pos = start;
@@ -267,11 +343,16 @@ static JsonValue parse_string(JsonParser *p) {
                 case 'n':  str[out++] = '\n'; break;
                 case 'r':  str[out++] = '\r'; break;
                 case 't':  str[out++] = '\t'; break;
-                case 'u':
-                    /* Skip unicode escapes for now */
-                    p->pos += 4;
-                    str[out++] = '?';
-                    break;
+                case 'u': {
+                    p->pos++;
+                    long cp = parse_unicode_escape(p);
+                    if (cp < 0) {
+                        free(str);
+                        return result;
+                    }
+                    out += utf8_encode((unsigned)cp, str + out);
+                    continue;  /* p->pos is already past the escape */
+                }
                 default:
                     str[out++] = p->json[p->pos];
                     break;
@@ -296,12 +377,9 @@ static JsonValue parse_string(JsonParser *p) {
 
 static JsonValue parse_number(JsonParser *p) {
     JsonValue result = { .type = JSON_ERROR };
+    size_t start = p->pos;
 
-    int neg = 0;
-    if (p->json[p->pos] == '-') {
-        neg = 1;
-        p->pos++;
-    }
+    if (p->json[p->pos] == '-') p->pos++;
 
     /* Accumulate with saturation: signed overflow would be undefined. */
     int val = 0;
@@ -318,16 +396,17 @@ static JsonValue parse_number(JsonParser *p) {
         p->pos++;
     }
     if (digits == 0) return result;   /* "-" with no digits is not a number */
-    if (overflow) val = INT_MAX;
 
-    /* Skip fractional/exponent parts - we only need integers */
+    int is_double = overflow;
     if (p->pos < p->len && p->json[p->pos] == '.') {
+        is_double = 1;
         p->pos++;
         while (p->pos < p->len && isdigit((unsigned char)p->json[p->pos])) {
             p->pos++;
         }
     }
     if (p->pos < p->len && (p->json[p->pos] == 'e' || p->json[p->pos] == 'E')) {
+        is_double = 1;
         p->pos++;
         if (p->pos < p->len && (p->json[p->pos] == '+' || p->json[p->pos] == '-')) {
             p->pos++;
@@ -337,8 +416,15 @@ static JsonValue parse_number(JsonParser *p) {
         }
     }
 
+    if (is_double) {
+        /* strtod stops at the same place: the span is a valid JSON number. */
+        result.type = JSON_DOUBLE;
+        result.data.double_val = strtod(p->json + start, NULL);
+        return result;
+    }
+
     result.type = JSON_INT;
-    result.data.int_val = neg ? -val : val;
+    result.data.int_val = (p->json[start] == '-') ? -val : val;
     return result;
 }
 
@@ -633,6 +719,13 @@ int json_object_get_int(const JsonValue *obj, const char *key, int def) {
             JsonValue *v = &obj->data.object_val.values[i];
             if (v->type == JSON_INT) {
                 return v->data.int_val;
+            }
+            if (v->type == JSON_DOUBLE) {  /* truncate, saturating */
+                double d = v->data.double_val;
+                if (d != d) return def;
+                if (d >= (double)INT_MAX) return INT_MAX;
+                if (d <= (double)INT_MIN) return INT_MIN;
+                return (int)d;
             }
             return def;
         }

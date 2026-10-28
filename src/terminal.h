@@ -25,6 +25,14 @@
  *   - Exits on EOF after timeout */
 int terminal_read_key(int fd);
 
+/* terminal_read_key, but calls the idle hook on each 100 ms timeout while
+ * waiting for the first byte. Only the top-level editor loop uses it: nested
+ * prompts (search) hold state that idle work could invalidate. */
+int terminal_read_key_idle(int fd);
+
+/* Set the function terminal_read_key_idle calls while idle (NULL: none). */
+void terminal_set_idle_hook(void (*fn)(void));
+
 /* ======================= Window Size Detection ============================ */
 
 /* Get current terminal window size in rows and columns.

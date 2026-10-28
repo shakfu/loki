@@ -57,6 +57,9 @@ void json_array_end(JsonBuilder *jb);
 /* Write object key (followed by value) */
 void json_key(JsonBuilder *jb, const char *key);
 
+/* Add an object key of len bytes (may contain NUL); escaped like a string */
+void json_key_len(JsonBuilder *jb, const char *key, size_t len);
+
 /* Write string value */
 void json_string(JsonBuilder *jb, const char *value);
 
@@ -65,6 +68,13 @@ void json_string_len(JsonBuilder *jb, const char *value, size_t len);
 
 /* Write integer value */
 void json_int(JsonBuilder *jb, int value);
+
+/* Add a 64-bit integer value */
+void json_int64(JsonBuilder *jb, long long value);
+
+/* Add a double; always written with '.' or an exponent, so it parses back
+ * as JSON_DOUBLE. Returns -1 (writing nothing) for NaN or infinity. */
+int json_double(JsonBuilder *jb, double value);
 
 /* Write boolean value */
 void json_bool(JsonBuilder *jb, int value);
@@ -94,6 +104,7 @@ typedef enum {
     JSON_NULL,
     JSON_BOOL,
     JSON_INT,
+    JSON_DOUBLE,        /* fraction, exponent, or an integer beyond int */
     JSON_STRING,
     JSON_ARRAY,
     JSON_OBJECT,
@@ -107,6 +118,7 @@ struct JsonValue {
     union {
         int bool_val;
         int int_val;
+        double double_val;
         struct {
             char *str;
             size_t len;
@@ -143,7 +155,8 @@ void json_value_free(JsonValue *val);
 /* Get string value from object by key (returns NULL if not found or wrong type) */
 const char *json_object_get_string(const JsonValue *obj, const char *key);
 
-/* Get int value from object by key (returns def if not found or wrong type) */
+/* Get int value from object by key (returns def if not found or wrong type).
+ * A JSON_DOUBLE is truncated toward zero and saturates at INT_MIN/INT_MAX. */
 int json_object_get_int(const JsonValue *obj, const char *key, int def);
 
 /* Get bool value from object by key (returns def if not found or wrong type) */

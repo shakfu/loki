@@ -53,19 +53,13 @@ editor.timestamp()     -- Insert current timestamp
 editor.first_line()    -- Display first line
 ```
 
-### `ai.lua`
-AI integration via OpenAI API (requires `OPENAI_API_KEY`).
+### `acp.lua`, `mcp.lua`, `jsonrpc.lua`
+Agent integration. `acp.lua` runs an agent over the Agent Client Protocol (`:agent <prompt>`); set `acp.command` to choose the agent. `mcp.lua` serves loki's buffers to agents over MCP (`:mcp`). `jsonrpc.lua` is the newline-delimited JSON-RPC both use. Design: [`docs/dev/agent-integration.md`](../../docs/dev/agent-integration.md).
 
 ```lua
-ai = require(".loki.modules.ai")
-
--- In editor: uses buffer content
-ai.complete()
-ai.explain()
-
--- In REPL: provide text
-ai.complete("your prompt here")
-ai.explain("code to explain")
+acp = require("acp")
+acp.command = {"myra", "--acp"}
+acp.ask("explain the current file")
 ```
 
 ### `test.lua`

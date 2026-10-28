@@ -40,6 +40,7 @@ struct undo_state {
     int last_edit_row;       /* Row of last edit */
     int last_edit_col;       /* Column of last edit */
     undo_op_type_t last_op;  /* Type of last operation */
+    int join_next;           /* Next operation joins the current group */
 
     /* Memory tracking */
     size_t memory_used;      /* Bytes used by undo data */
@@ -73,6 +74,7 @@ void undo_init(editor_ctx_t *ctx, int capacity, size_t memory_limit) {
     undo->last_edit_row = -1;
     undo->last_edit_col = -1;
     undo->last_op = (undo_op_type_t)-1;
+    undo->join_next = 0;
     undo->memory_used = 0;
     undo->memory_limit = memory_limit;
 
@@ -82,7 +84,7 @@ void undo_init(editor_ctx_t *ctx, int capacity, size_t memory_limit) {
 /* Does this operation type own a heap-allocated line_op.content? */
 static int entry_owns_content(undo_op_type_t type) {
     return type == UNDO_INSERT_LINE || type == UNDO_DELETE_LINE ||
-           type == UNDO_DELETE_BLOCK;
+           type == UNDO_DELETE_BLOCK || type == UNDO_INSERT_BLOCK;
 }
 
 /* Physical slot of the i'th live entry (0 = oldest) in the circular buffer. */
@@ -117,6 +119,10 @@ void undo_free(editor_ctx_t *ctx) {
 static int should_break_group(struct undo_state *undo, undo_op_type_t op,
                                int row, int col) {
     if (undo->current_group_id == 0) return 1;  /* First operation */
+    if (undo->join_next) {
+        undo->join_next = 0;
+        return 0;
+    }
 
     /* Time gap check */
     time_t now = time(NULL);
@@ -475,6 +481,11 @@ static void apply_undo(editor_ctx_t *ctx, undo_entry_t *entry) {
                            entry->data.line_op.content,
                            entry->data.line_op.length);
             break;
+
+        case UNDO_INSERT_BLOCK:
+            delete_range_at(ctx, entry->row, entry->col,
+                            entry->data.line_op.length);
+            break;
     }
 
     /* Restore cursor position from before the operation */
@@ -549,10 +560,89 @@ static void apply_redo(editor_ctx_t *ctx, undo_entry_t *entry) {
             delete_range_at(ctx, entry->row, entry->col,
                             entry->data.line_op.length);
             break;
+
+        case UNDO_INSERT_BLOCK:
+            insert_text_at(ctx, entry->row, entry->col,
+                           entry->data.line_op.content,
+                           entry->data.line_op.length);
+            break;
     }
 
     /* Restore undo state */
     ctx->model.undo_state = saved_state;
+}
+
+/* Copy up to len bytes from (row, col), joining rows with '\n'. Stores the
+ * byte count actually available in *out_len. */
+static char *range_text(editor_ctx_t *ctx, int row, int col, int len, int *out_len) {
+    char *buf = malloc((size_t)len + 1);
+    if (!buf) return NULL;
+    int n = 0;
+    while (n < len && row < ctx->model.numrows) {
+        t_erow *r = &ctx->model.row[row];
+        int take = r->size - col;
+        if (take > len - n) take = len - n;
+        memcpy(buf + n, r->chars + col, (size_t)take);
+        n += take;
+        if (n < len && row + 1 < ctx->model.numrows) buf[n++] = '\n';
+        else if (n < len) break;  /* no newline after the last row */
+        row++;
+        col = 0;
+    }
+    buf[n] = '\0';
+    *out_len = n;
+    return buf;
+}
+
+static void record_block(editor_ctx_t *ctx, undo_op_type_t type, int row, int col,
+                         const char *content, int length) {
+    char *copy = malloc((size_t)length + 1);  /* not strndup: text may hold NUL */
+    if (!copy) return;
+    memcpy(copy, content, (size_t)length);
+    copy[length] = '\0';
+    undo_entry_t entry = {
+        .type = type,
+        .row = row,
+        .col = col,
+        .data.line_op.content = copy,
+        .data.line_op.length = length,
+        .cursor_row = ctx->view.cy,
+        .cursor_col = ctx->view.cx,
+        .cursor_rowoff = ctx->view.rowoff,
+        .cursor_coloff = ctx->view.coloff
+    };
+    record_operation(ctx, &entry);
+}
+
+int editor_replace_range(editor_ctx_t *ctx, int row, int col, int del_len,
+                         const char *text, int len) {
+    if (row < 0 || row >= ctx->model.numrows) return -1;
+    if (col < 0) col = 0;
+    if (col > ctx->model.row[row].size) col = ctx->model.row[row].size;
+    if (del_len < 0) del_len = 0;
+    if (len < 0) len = 0;
+
+    int deleted_len = 0;
+    char *deleted = del_len > 0 ? range_text(ctx, row, col, del_len, &deleted_len) : NULL;
+    if (del_len > 0 && !deleted) return -1;
+
+    struct undo_state *undo = ctx->model.undo_state;
+    if (undo) undo_break_group(ctx);
+    if (deleted_len > 0) {
+        if (undo) record_block(ctx, UNDO_DELETE_BLOCK, row, col, deleted, deleted_len);
+        delete_range_at(ctx, row, col, deleted_len);
+    }
+    if (len > 0) {
+        if (undo && deleted_len > 0) undo->join_next = 1;
+        if (undo) record_block(ctx, UNDO_INSERT_BLOCK, row, col, text, len);
+        insert_text_at(ctx, row, col, text, len);
+    }
+    if (undo) {
+        undo->join_next = 0;
+        undo_break_group(ctx);
+    }
+    free(deleted);
+    return 0;
 }
 
 int undo_perform(editor_ctx_t *ctx) {

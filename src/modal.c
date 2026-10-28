@@ -38,6 +38,7 @@
 #include "undo.h"
 #include "buffers.h"
 #include "lang_bridge.h"
+#include "choice.h"
 #ifdef BUILD_CSOUND_BACKEND
 #include "shared/audio/audio.h"  /* For CSD file playback */
 #endif
@@ -890,8 +891,15 @@ static void process_visual_mode(editor_ctx_t *ctx, int fd, int c) {
  * For non-terminal input sources, use modal_process_event() directly.
  */
 int modal_process_keypress(editor_ctx_t *ctx, int fd) {
-    int c = terminal_read_key(fd);
+    int c = terminal_read_key_idle(fd);
     if (c == -1) return -1;  /* Input closed or failed. */
+
+    /* Idle work (a Lua callback calling loki.open) may have switched buffers
+     * while we waited; the key belongs to the buffer now shown. */
+    editor_ctx_t *shown = buffer_get_current();
+    if (shown) ctx = shown;
+
+    if (choice_handle_key(c)) return 0;  /* answering a pending question */
 
     /* Handle pending Ctrl-X prefix - read second key immediately from terminal */
     if (ctx->view.pending_prefix == CTRL_X) {

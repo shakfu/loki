@@ -18,6 +18,7 @@ typedef enum {
     UNDO_INSERT_LINE,    /* Insert newline (split line) */
     UNDO_DELETE_LINE,    /* Delete newline (merge lines) */
     UNDO_DELETE_BLOCK,   /* Delete a multi-character/multi-line range */
+    UNDO_INSERT_BLOCK,   /* Insert a multi-character/multi-line range */
 } undo_op_type_t;
 
 /* Single undo operation */
@@ -73,6 +74,13 @@ void undo_record_delete_line(editor_ctx_t *ctx, int row, int col, const char *co
  * deleted text, with embedded '\n' for row boundaries. Recorded as one entry
  * so a large selection delete does not flood the undo ring. */
 void undo_record_delete_block(editor_ctx_t *ctx, int row, int col, const char *content, int length);
+
+/* Replace del_len bytes at (row, col) with text, as one undo group. A row
+ * boundary counts as one byte ('\n'), as in the text text may contain.
+ * The range is clamped to the buffer. Returns 0, or -1 if row is out of
+ * range or memory runs out. */
+int editor_replace_range(editor_ctx_t *ctx, int row, int col, int del_len,
+                         const char *text, int len);
 
 /* Force start of new undo group (e.g., after mode change, after delay) */
 void undo_break_group(editor_ctx_t *ctx);

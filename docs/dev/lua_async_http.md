@@ -71,7 +71,7 @@ if not id then
 end
 ```
 
-Bundled helpers: `.loki/modules/ai.lua`, `.loki/modules/example.lua` (require a trusted project config and an HTTP-enabled binary). Prefer `os.getenv` for API keys.
+Bundled helper: `.loki/modules/example.lua` (requires a trusted project config and an HTTP-enabled binary). Prefer `os.getenv` for API keys.
 
 ## Debugging
 

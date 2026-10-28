@@ -500,7 +500,8 @@ int loki_http_request(editor_ctx_t *ctx, const char *url, const char *method,
     return slot;
 }
 
-void loki_http_poll(lua_State *L) {
+int loki_http_poll(lua_State *L) {
+    int completed = 0;
     for (int i = 0; i < LOKI_HTTP_MAX_ASYNC_REQUESTS; i++) {
         async_http_request_t *req = pending_requests[i];
         if (!req) continue;
@@ -581,8 +582,10 @@ void loki_http_poll(lua_State *L) {
 
             pending_requests[i] = NULL;
             num_pending--;
+            completed++;
         }
     }
+    return completed;
 }
 
 int loki_http_pending_count(void) {

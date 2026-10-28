@@ -63,6 +63,7 @@ set(LOKI_SOURCES
     src/languages.c
     src/search.c
     src/bracket.c
+    src/choice.c
     src/undo.c
     src/indent.c
     src/json.c
@@ -75,6 +76,11 @@ set(LOKI_SOURCES
     src/command/substitute.c
     src/editor.c
     src/lua.c
+    src/lua_json.c
+    src/lua_buffers.c
+    src/spawn.c
+    src/listen.c
+    src/mcp_shim.c
     src/lang_bridge.c
     src/session.c
     src/host.c
@@ -213,6 +219,10 @@ if(BUILD_TESTS)
         test_command_handlers
         test_lua_modules
         test_bracket
+        test_lua_json
+        test_spawn
+        test_lua_buffers
+        test_mcp
     )
 
     foreach(test_name ${LOKI_TESTS})
@@ -228,6 +238,35 @@ if(BUILD_TESTS)
     endforeach()
     target_compile_definitions(test_lua_modules PRIVATE
         LOKI_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.loki/modules")
+    target_compile_definitions(test_mcp PRIVATE
+        LOKI_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.loki/modules"
+        LOKI_BINARY="$<TARGET_FILE:loki>")
+    add_dependencies(test_mcp loki)
+
+    # End-to-end: the editor in a pty (POSIX only; needs python3)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME e2e_idle_spawn
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/idle_spawn.py
+                         $<TARGET_FILE:loki>)
+        add_executable(test_acp tests/loki/test_acp.c)
+        target_include_directories(test_acp PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+            ${LUA_INCLUDE_DIR}
+        )
+        target_link_libraries(test_acp PRIVATE libloki test_framework)
+        target_compile_definitions(test_acp PRIVATE
+            LOKI_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.loki/modules"
+            PYTHON3="${Python3_EXECUTABLE}"
+            MOCK_AGENT="${CMAKE_CURRENT_SOURCE_DIR}/tests/acp_mock_agent.py")
+        add_test(NAME test_acp COMMAND test_acp)
+
+        add_test(NAME e2e_mcp_shim
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/mcp_shim.py
+                         $<TARGET_FILE:loki> ${CMAKE_CURRENT_SOURCE_DIR}/.loki/modules)
+    endif()
 
     # HTTP tests (only if HTTP enabled)
     if(LOKI_ENABLE_HTTP)

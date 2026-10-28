@@ -91,7 +91,7 @@ Evaluate Lua at `>> `; builtins `help`, `history`, `clear`, `clear-history`, `ex
 ```lua
 >> count_lines()
 >> loki.status("Hello!")
->> ai.complete()          -- needs HTTP build + OPENAI_API_KEY + trusted config
+>> loki.buffers()         -- open buffers: id, path, dirty, cursor
 ```
 
 Register help entries with `loki.repl.register(...)` — see [`docs/dev/repl_extension.md`](docs/dev/repl_extension.md).
@@ -105,10 +105,58 @@ Register help entries with `loki.repl.register(...)` — see [`docs/dev/repl_ext
 | `loki.get_cursor()` / `loki.insert_text(text)` | Cursor / insert |
 | `loki.get_filename()` | Current path |
 | `loki.async_http(url, method, body, headers, callback)` | Async HTTP (HTTP builds only) |
+| `loki.buffers()` | Open buffers: `{id, name, path, dirty, current, line, col}` |
+| `loki.buffer_text(id [, first, last])` | Buffer text, rows joined by `\n`, 1-based inclusive lines |
+| `loki.buffer_replace(id, i, j, text)` | Replace bytes `i..j` of `buffer_text(id)` as one undo step; does not save |
+| `loki.buffer_find(path)` / `loki.open(path [, line])` | Buffer for a path / open or switch to it |
+| `loki.get_selection()` | `{id, text, start_line, start_col, end_line, end_col}` or `nil` |
+| `loki.abspath(path)` | Absolute path without symlinks; a missing file resolves through its directory |
+| `loki.buffer_new(name)` / `loki.buffer_save(id)` | Scratch buffer (never dirty, not switched to) / save a buffer |
+| `loki.choose(question, labels, fn)` | One-key question on the message line; `fn(i)` or `fn(nil)` on `Esc` |
+| `loki.exepath()` | Path of the running loki binary |
+| `loki.listen{path, on_connect, on_data, on_close}` | Unix socket server; connections have `write(s)`, `close()` (not in `LUA_SANDBOX` builds) |
+| `loki.spawn{cmd, args, cwd, env, on_stdout, on_stderr, on_exit}` | Child process with non-blocking pipes (not in `LUA_SANDBOX` builds) |
+| `loki.json.encode(v)` / `loki.json.decode(s)` | JSON; `loki.json.null`, `loki.json.array(t)` |
+
+`loki.spawn` returns a process with `write(s)`, `close_stdin()`, `kill([sig])`, `pid()` and `running()`, or `nil, message`. Callbacks get the process first: `on_stdout(p, chunk)`, `on_exit(p, code, signal)`. `on_exit` runs after both pipes reach EOF, so all output has been delivered. The child runs in a new session without a controlling terminal. In `env`, `false` removes a variable. Children get SIGTERM when loki exits.
+
+`loki.json` decodes `null` as `loki.json.null` and arrays as tables marked by `loki.json.array`. An unmarked empty table encodes as `{}`. Invalid UTF-8 in strings encodes as U+FFFD.
 
 `async_http` invokes a **global** callback with a response table `{ status, body, error }`, not a bare string. Limits and SSRF rules: [`docs/security.md`](docs/security.md), [`docs/dev/lua_async_http.md`](docs/dev/lua_async_http.md).
 
-Bundled modules (when config loads): `editor.*`, `ai.complete` / `ai.explain`, languages, themes, markdown helpers.
+Bundled modules (when config loads): `editor.*`, `acp` (`:agent`), `mcp` (`:mcp`), `jsonrpc`, languages, themes, markdown helpers.
+
+### Agents over ACP
+
+`:agent <prompt>` runs a coding agent and sends it a prompt, using the [Agent Client Protocol](https://agentclientprotocol.com). Replies stream into the `*agent*` buffer, which is never dirty; switch to it with `Ctrl-X n`.
+
+- **Commands:** `:agent cancel` ends the turn; `:agent stop` ends the agent.
+- **Choosing the agent:** set `require("acp").command` in `init.lua`. The default is `{"myra", "--acp"}`.
+- **Context:** the current file goes with each prompt as a `resource_link`.
+- **Reads:** the agent reads files through loki, so it sees unsaved edits.
+- **Writes:** an open buffer is replaced as one undo step and then saved; an unopened file is written directly. Both go to disk because the agent's own tools, such as tests and builds, read the disk.
+- **Path limits:** reads and writes outside the directory loki started in are refused.
+- **Permission requests:** they appear on the message line. Press a number to choose, or `Esc` to cancel.
+- **MCP:** if `:mcp` is running, the agent also gets the MCP tools below.
+
+### Agents over MCP
+
+`:mcp` starts an [MCP](https://modelcontextprotocol.io/specification) server on a Unix socket. An agent reads open buffers, including unsaved edits, and edits them through these tools:
+- `list_buffers`
+- `read_buffer`
+- `get_selection`
+- `edit_buffer`
+- `open_file`
+
+Edits land in the buffer as one undo step and are never saved; review them and `:w`. `edit_buffer` and `open_file` only accept paths inside the directory loki started in.
+
+The agent runs `loki --mcp-shim [SOCK]` as its stdio server. Without `SOCK`, the shim uses `$LOKI_MCP_SOCK`, else the newest live socket in `$XDG_RUNTIME_DIR/loki` (or `/tmp/loki-<uid>`). For example, with Claude Code:
+
+```bash
+claude mcp add loki -- loki --mcp-shim
+```
+
+The server answers both the `2026-07-28` per-request protocol and the older `initialize` handshake.
 
 ### Highlight hook
 

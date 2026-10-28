@@ -31,10 +31,18 @@
 #include "lang_bridge.h"
 #include "live_loop.h"
 #include "async_queue.h"
+#include "spawn.h"
+#include "listen.h"
+#include "mcp_shim.h"
+#include <uv.h>
 #include "shared/context.h"
 
 #ifdef LOKI_USE_LINENOISE
 #include "treesitter.h"
+#endif
+
+#ifdef LOKI_ENABLE_HTTP
+#include "http.h"
 #endif
 
 /* ======================== Main Editor Instance ============================ */
@@ -264,6 +272,50 @@ void lua_apply_highlight_row(editor_ctx_t *ctx, t_erow *row, int default_ran) {
     in_hook = 0;
 }
 
+/* ======================== Background Work ================================ */
+
+/* Run work that does not come from a key: resize, async events, HTTP
+ * completions. Returns nonzero if any ran, so the screen may be stale. */
+static int editor_run_background(editor_ctx_t *ctx) {
+    int ran = 0;
+
+    /* Every buffer keeps its own copy of the screen size. */
+    if (terminal_host_resize_pending(g_terminal_host)) {
+        terminal_host_clear_resize(g_terminal_host);
+        int rows, cols;
+        terminal_query_window_size(&rows, &cols);
+        editor_resize_buffers(rows, cols);
+        ran = 1;
+    }
+
+    /* Check live loops for beat boundary triggers (pushes events to queue) */
+    live_loop_tick();
+
+    /* libuv I/O (loki.spawn); its callbacks run Lua directly. */
+    uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+    if (loki_spawn_take_activity()) ran = 1;
+    if (loki_listen_take_activity()) ran = 1;
+
+    /* Dispatch all pending async events (timer, custom, user-defined) */
+    if (async_queue_dispatch_all(NULL, ctx) > 0) ran = 1;
+
+    if (ctx_L(ctx)) {
+        /* Update language slot state */
+        loki_lang_check_callbacks(ctx, ctx_L(ctx));
+#ifdef LOKI_ENABLE_HTTP
+        if (loki_http_poll(ctx_L(ctx)) > 0) ran = 1;
+#endif
+    }
+
+    return ran;
+}
+
+/* Idle hook: without it, background work waits for the next keypress. */
+static void editor_idle(void) {
+    editor_ctx_t *ctx = buffer_get_current();
+    if (ctx && editor_run_background(ctx)) editor_refresh_screen(ctx);
+}
+
 /* ======================== Main Editor Function =========================== */
 
 static void print_usage(void) {
@@ -271,6 +323,7 @@ static void print_usage(void) {
     printf("\nOptions:\n");
     printf("  -h, --help          Show this help message\n");
     printf("  -v, --version       Show version information\n");
+    printf("  --mcp-shim [SOCK]   Relay MCP over stdio to a running loki (see :mcp)\n");
     printf("\nExamples:\n");
     printf("  " LOKI_NAME " file.txt         Open file in editor\n");
     printf("\nKeybindings:\n");
@@ -286,6 +339,11 @@ int loki_editor_main(int argc, char **argv) {
      * (undo_state, indent_config, language states) and Lua bootstrap
      * may access these fields before buffers_init() runs. */
     static editor_ctx_t E;
+
+    /* The shim relays stdio and is not an editor: no terminal, no atexit
+     * teardown, nothing written to stdout but MCP messages. */
+    if (argc >= 2 && strcmp(argv[1], "--mcp-shim") == 0)
+        return loki_mcp_shim(argc >= 3 ? argv[2] : NULL);
 
     /* Initialize language bridge system */
     loki_lang_init();
@@ -433,6 +491,7 @@ int loki_editor_main(int argc, char **argv) {
     /* Initialize terminal host and enable raw mode */
     terminal_host_init(g_terminal_host, STDIN_FILENO);
     terminal_host_enable_raw_mode(g_terminal_host);
+    terminal_set_idle_hook(editor_idle);
     editor_set_status_msg(buffer_get_current(),
         "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find | Ctrl-T = new buf | Ctrl-X n/p/k = buf nav");
 
@@ -444,25 +503,7 @@ int loki_editor_main(int argc, char **argv) {
             exit(1);
         }
 
-        /* Every buffer keeps its own copy of the screen size. */
-        if (terminal_host_resize_pending(g_terminal_host)) {
-            terminal_host_clear_resize(g_terminal_host);
-            int rows, cols;
-            terminal_query_window_size(&rows, &cols);
-            editor_resize_buffers(rows, cols);
-        }
-
-        /* Check live loops for beat boundary triggers (pushes events to queue) */
-        live_loop_tick();
-
-        /* Dispatch all pending async events (timer, custom, user-defined) */
-        async_queue_dispatch_all(NULL, ctx);
-
-        /* Update language slot state */
-        if (ctx_L(ctx)) {
-            loki_lang_check_callbacks(ctx, ctx_L(ctx));
-        }
-
+        editor_run_background(ctx);
         editor_refresh_screen(ctx);
         /* Stop on closed input (e.g. terminal hangup) instead of spinning. */
         if (editor_process_keypress(ctx, STDIN_FILENO) < 0) break;
@@ -495,6 +536,10 @@ void editor_cleanup_resources(editor_ctx_t *ctx) {
         ctx->model.ts_state = NULL;
     }
 #endif
+
+    /* Before the queue cleanup runs the libuv loop and before Lua closes. */
+    loki_spawn_shutdown();
+    loki_listen_shutdown();
 
     /* Clean up async event queue */
     async_queue_cleanup();

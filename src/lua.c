@@ -36,6 +36,10 @@
 #include "lang_bridge.h"  /* Language bridge for Lua API registration */
 #include "buffers.h"    /* Buffer management for buffer_get_current() */
 #include "trust.h"      /* Trust list for project-local config */
+#include "lua_json.h"   /* loki.json */
+#include "lua_buffers.h" /* loki.buffers, buffer_text, ... */
+#include "spawn.h"      /* loki.spawn */
+#include "listen.h"     /* loki.listen */
 #ifdef LOKI_ENABLE_HTTP
 #include "http.h"       /* Async HTTP support */
 #endif
@@ -1519,9 +1523,18 @@ lua_State *loki_lua_bootstrap(editor_ctx_t *ctx, const struct loki_lua_opts *opt
 
     if (effective.bind_editor) {
         loki_lua_bind_editor(L);
+        loki_lua_bind_buffers(L);
     } else {
         loki_lua_bind_minimal(L);
     }
+
+    loki_lua_bind_json(L);
+#ifndef LUA_SANDBOX
+    /* Spawning would restore what the sandbox removes with io.popen;
+     * listening would let other processes drive the editor. */
+    loki_lua_bind_spawn(L);
+    loki_lua_bind_listen(L);
+#endif
 
 #ifdef LOKI_ENABLE_HTTP
     if (effective.bind_http) {

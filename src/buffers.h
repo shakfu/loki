@@ -90,6 +90,13 @@ int buffer_get_list(int *ids);
  * Returns: Display name (pointer to internal buffer, do not free) */
 const char *buffer_get_display_name(int buffer_id);
 
+/* Mark a buffer as scratch (agent output): shown as name, never dirty, so
+ * it does not hold up quitting. Returns 0, or -1 if not found. */
+int buffer_set_scratch(int buffer_id, const char *name);
+
+/* 1 if the buffer is scratch, else 0 */
+int buffer_is_scratch(int buffer_id);
+
 /* Check if buffer has unsaved changes
  * buffer_id: ID of buffer to check
  * Returns: 1 if modified, 0 if not, -1 if buffer not found */

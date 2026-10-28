@@ -26,43 +26,12 @@ Trusted local config replaces the global one (they are not merged).
 From the docked REPL (`Ctrl-L`), after config loads:
 
 - `count_lines()`, `insert_timestamp()`, `editor.*` — see `modules/editor.lua`
-- `ai.complete()` / `ai.explain()` — OpenAI helpers; need `-DLOKI_ENABLE_HTTP=ON` and `OPENAI_API_KEY`
+- `require("acp").ask(text)` / `require("mcp").start()` — the functions behind `:agent` and `:mcp`
 - `test.http` / example fetch helpers — see `modules/test.lua`, `modules/example.lua`
 
-## AI Integration
+## Agents
 
-The async HTTP API enables non-blocking AI completions:
-
-### Prerequisites
-
-Set your OpenAI API key as an environment variable:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-./loki myfile.txt
-```
-
-### Usage
-
-1. Open a file with loki
-2. Press `Ctrl-L` to open Lua command prompt
-3. Type `ai_complete()` and press Enter
-4. Continue editing - the response will appear automatically when ready
-5. No blocking, no freezing!
-
-### Example Workflow
-
-```bash
-# Write some text or code in loki
-echo "Explain how async HTTP works" > question.txt
-./loki question.txt
-
-# In loki, press Ctrl-L and type:
-ai_complete()
-
-# Continue editing while AI processes
-# Response appears automatically in buffer
-```
+`:agent <prompt>` runs a coding agent over ACP (`modules/acp.lua`). `:mcp` lets an agent read and edit buffers over MCP (`modules/mcp.lua`). See "Agents over ACP" and "Agents over MCP" in the top-level README.
 
 ## Lua API
 

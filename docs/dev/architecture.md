@@ -12,7 +12,7 @@ Loki is a **POSIX terminal editor**: one C11 static library and one CLI.
 | `libloki` (`OUTPUT_NAME loki`) | `libloki.a` / `libloki.so` | Editor core, Lua bridge, optional HTTP, session/host, REPL helpers |
 | `loki` | `build/loki` | `src/main.c` → `loki_editor_main()` |
 
-CLI today: `loki <filename>`, plus `--help` / `--version`. The Lua REPL is the **docked panel** (`Ctrl-L`), not a separate binary or `--repl` flag. AI workflows go through Lua (`ai.complete` / `loki.async_http`) when HTTP is compiled in.
+CLI today: `loki <filename>`, plus `--help` / `--version`. The Lua REPL is the **docked panel** (`Ctrl-L`), not a separate binary or `--repl` flag. Agents run over ACP (`:agent`) and MCP (`:mcp`); see [`agent-integration.md`](agent-integration.md).
 
 There are no `loki-editor` / `loki-repl` executables. Older design notes that described that split are obsolete.
 

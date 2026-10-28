@@ -473,6 +473,22 @@ The regression tests are in `tests/test_http_security.c`. Run them with `make te
 
 ---
 
+## Agent Integration (MCP)
+
+`:mcp` listens on a Unix socket, so other processes can read and edit buffers.
+
+- **Who can connect:** the socket's directory must be owned by the user and have no group or other permissions. `loki.listen` creates it with mode 0700 and refuses an existing directory that fails these checks. A directory pre-created in `/tmp` by another user is refused, so only the user and root can connect.
+- **What a client can do:**
+  - read every open buffer;
+  - replace text in open buffers inside the start directory;
+  - open files inside that directory.
+
+  Paths are resolved without symlinks before the check. A missing file resolves through its parent directory, and a final `..` is rejected.
+- **What it cannot do:** save files or run Lua; no tool does either. Edits are undoable and unsaved until the user runs `:w`.
+- **Limits:** 8 connections, 16 MB of queued output per connection, 64 MB per message line.
+
+An agent typically has its own file and shell tools. The MCP server does not confine it.
+
 ## File System Security
 
 ### File Access Permissions

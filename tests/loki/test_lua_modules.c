@@ -1,6 +1,6 @@
 /* test_lua_modules.c - Tests for the bundled Lua modules in .loki/modules
  *
- * Loads ai, example and test against the real loki API, with
+ * Loads example and test against the real loki API, with
  * loki.async_http replaced by a stub so no request leaves the process.
  */
 
@@ -29,13 +29,12 @@ static const char *prelude =
     "    error(('want %q, got %q'):format(want, tostring(last_status)), 2)\n"
     "  end\n"
     "end\n"
-    "ai, example, test = require('ai'), require('example'), require('test')\n";
+    "example, test = require('example'), require('test')\n";
 
 static void init_ctx(editor_ctx_t *ctx) {
     editor_ctx_init(ctx);
     ctx->lua_host = lua_host_create();
     if (ctx->lua_host) ctx->lua_host->L = loki_lua_bootstrap(ctx, NULL);
-    setenv("OPENAI_API_KEY", "test-key", 1);
 }
 
 static void free_ctx(editor_ctx_t *ctx) {
@@ -63,8 +62,6 @@ TEST(modules_report_rejected_request) {
     ASSERT_NOT_NULL(ctx_L(&ctx));
 
     int rc = run(&ctx,
-        "ai.complete('hi');     expect('Error: URL points at an internal address')\n"
-        "ai.explain('x = 1');   expect('Error: URL points at an internal address')\n"
         "example.fetch_quote(); expect('Error: URL points at an internal address')\n"
         "test.http();           expect('HTTP test failed: URL points at an internal address')\n");
     ASSERT_EQ(rc, 0);
@@ -81,7 +78,6 @@ TEST(modules_report_sent_request) {
 
     int rc = run(&ctx,
         "stub_result = {3, nil}\n"
-        "ai.complete('hi');     expect('AI request sent... (will appear when ready)')\n"
         "example.fetch_quote(); expect('Fetching random quote...')\n"
         "test.http();           expect('Testing HTTP...')\n");
     ASSERT_EQ(rc, 0);
@@ -106,9 +102,7 @@ TEST(modules_handle_response_tables) {
         "test_http_handler({status = 0, error = 'timeout'})\n"
         "expect('HTTP test failed: timeout')\n"
         "test_http_handler({status = 204})\n"
-        "expect('HTTP test failed: empty response')\n"
-        "ai_response_handler({status = 0, error = 'timeout'})\n"
-        "expect('Error: timeout')\n");
+        "expect('HTTP test failed: empty response')\n");
     ASSERT_EQ(rc, 0);
 
     free_ctx(&ctx);
