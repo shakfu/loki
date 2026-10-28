@@ -354,7 +354,7 @@ int loki_editor_main(int argc, char **argv) {
         struct loki_lua_opts opts = {
             .bind_editor = 1,
 #ifdef LOKI_ENABLE_HTTP
-            .bind_http = 0,
+            .bind_http = 1,
 #endif
             .load_config = 1,
             .config_override = NULL,

@@ -1,21 +1,14 @@
 # Extending the Loki REPL
 
-The embedded REPL gives you a fast way to exercise Loki's Lua API without leaving the editor. This guide shows how to shape the experience for your project by registering discoverable commands, composing helper wrappers, and wiring them into the existing async tooling.
+**Status:** current as of 2026-10-28.
 
-## Workflow Basics
+Toggle the docked REPL with `Ctrl-L` while editing a file. Built-ins: `help`, `history`, `clear`, `clear-history`, `exit`. Line editing uses linenoise with Tree-sitter highlighting when available.
 
-- Toggle the panel with `Ctrl-L`; it stays collapsed when idle so the text view keeps its full height.
-- The prompt is `>> `. Type Lua expressions, press `Enter`, and read the results immediately above the prompt.
-- Built-in helpers: `help`, `history`, `clear`, `clear-history`, `exit`.
-- Use `Up`/`Down` to replay previous input, `Ctrl-U` to clear the current line.
-
-## Surfacing Project Commands
-
-You can publish project-specific helpers in the REPL's `help` output by calling `loki.repl.register` inside `.loki/init.lua` (or `~/.loki/init.lua`).
+## Register project commands
 
 ```lua
--- .loki/init.lua
-local function insert_header()
+-- .loki/init.lua (project must be :trust'ed)
+function insert_header()
     loki.insert_text("/* generated */\n")
 end
 
@@ -24,50 +17,43 @@ loki.repl.register(
     "Insert a C-style generated header comment",
     "insert_header()"
 )
-
-function insert_header()
-    insert_header()
-end
 ```
 
-Reload Loki (or run `:reload` from your config) and the REPL `help` command now shows the new entry under "Project commands". Registered examples are optional but make it easier for teammates to discover the right call shape.
+`help` lists these under project commands. Keep names unique; duplicates clutter the list.
 
-## Organizing Helper Modules
+## Modules
 
-- Use plain Lua modules under `.loki/` to group related commands (`require("my_project.lint")`).
-- Expose just a thin wrapper that calls into the module, then register the wrapper with `loki.repl.register`.
-- Pair registrations with unit-friendly helpers—e.g. a formatter that streams HTTP output back into the buffer through `loki.async_http`.
+Group helpers under `.loki/modules/` and `require` them from init. Register only thin wrappers so `help` stays readable.
 
-## Asynchronous Patterns
+## Async HTTP from the REPL
 
-Combine the REPL with the async HTTP bridge to iterate quickly on AI or tooling integrations:
+Requires an HTTP-enabled build. Callbacks receive a **table** (`status`, `body`, `error`), not a bare string:
 
 ```lua
-local function explain_selection()
-    local cursor = { loki.get_cursor() }
-    loki.async_http(
-        "https://internal.tools/api/explain",
+function handle_explain(response)
+    if not response or response.error then
+        loki.status(tostring(response and response.error))
+        return
+    end
+    if response.body then
+        loki.insert_text("\n" .. response.body)
+    end
+end
+
+function explain_line()
+    local row = select(1, loki.get_cursor())
+    local line = loki.get_line(row) or ""
+    local id, err = loki.async_http(
+        "https://example.com/api/explain",
         "POST",
-        json.encode({ row = cursor[1], col = cursor[2] }),
-        { "Content-Type: application/json" },
+        line,
+        {"Content-Type: text/plain"},
         "handle_explain"
     )
+    if not id then loki.status(tostring(err)) end
 end
 
-function handle_explain(response)
-    loki.insert_text("\n" .. response)
-end
-
-loki.repl.register("explain_selection", "Send selection to internal explain API")
+loki.repl.register("explain_line", "POST current line to explain API")
 ```
 
-Invoking `explain_selection()` from the REPL will queue the HTTP request without blocking the editor.
-
-## Tips
-
-- Use `clear` to reset the output log when testing long-running sequences.
-- `clear-history` is handy when you refine a snippet and don't want outdated attempts replayed.
-- Log structured data from Lua with `print(vim.inspect(tbl))` or a JSON encoder before inserting into the buffer.
-- Keep helper names unique—`loki.repl.register` appends entries in the order you call it, so duplicates clutter the `help` output.
-
-Need more examples? Copy one of the recipes into `.loki/init.lua`, tweak it for your service, and it will be instantly available every time you toggle the REPL.
+See `lua_async_http.md` and `docs/security.md`.

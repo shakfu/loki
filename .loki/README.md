@@ -1,43 +1,33 @@
 # Loki Lua Configuration Example
 
-This directory contains example Lua configuration for the loki editor with async HTTP support.
+Bundled Lua configuration for loki (init, modules, languages, themes). Copy this tree into a project as `.loki/`, or install pieces under `~/.loki/`.
 
 ## Setup
 
-To use this configuration:
-
 ```bash
-# Copy to .loki directory (project-specific)
-cp -r .loki.example .loki
+# Project-local (then :trust inside loki and restart)
+cp -r /path/to/loki/.loki .loki
 
-# Or copy to home directory (global)
-mkdir -p ~/.loki
-cp .loki.example/init.lua ~/.loki/
+# Or global
+mkdir -p ~/.loki/modules
+cp init.lua ~/.loki/
+cp -r modules/* ~/.loki/modules/
 ```
 
 ## Configuration Priority
 
-Loki loads Lua configuration in this order:
+1. `.loki/init.lua` — only if the directory is trusted (`:trust` → `~/.loki/trusted`)
+2. otherwise `~/.loki/init.lua`
 
-1. `.loki/init.lua` - Local, project-specific (current working directory)
-2. `~/.loki/init.lua` - Global, home directory
+Trusted local config replaces the global one (they are not merged).
 
-**Note:** If a local `.loki/init.lua` exists, the global config is **NOT** loaded.
+## Available Helpers
 
-## Available Functions
+From the docked REPL (`Ctrl-L`), after config loads:
 
-### Basic Functions
-
-- `count_lines()` - Display total number of lines
-- `show_cursor()` - Show current cursor position
-- `insert_timestamp()` - Insert current date/time at cursor
-- `first_line()` - Display content of first line
-
-### Async HTTP Functions
-
-- `test_http()` - Test async HTTP with GitHub API (simple GET request)
-- `ai_complete()` - Send entire buffer to OpenAI and insert response
-- `ai_explain()` - Get AI explanation of code in buffer
+- `count_lines()`, `insert_timestamp()`, `editor.*` — see `modules/editor.lua`
+- `ai.complete()` / `ai.explain()` — OpenAI helpers; need `-DLOKI_ENABLE_HTTP=ON` and `OPENAI_API_KEY`
+- `test.http` / example fetch helpers — see `modules/test.lua`, `modules/example.lua`
 
 ## AI Integration
 

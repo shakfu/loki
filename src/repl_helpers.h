@@ -61,8 +61,8 @@ char *repl_trim_trailing(char *str);
  * @brief Get the history file path for a language.
  *
  * Determines the appropriate history file location:
- * 1. If local .psnd/ directory exists, use .psnd/<lang>_history
- * 2. Else if ~/.psnd/ exists, use ~/.psnd/<lang>_history
+ * 1. If local .loki/ directory exists, use .loki/<lang>_history
+ * 2. Else if ~/.loki/ exists, use ~/.loki/<lang>_history
  * 3. Otherwise, buf is set to empty string (no history)
  *
  * @param lang_name Language name (e.g., "joy", "tr7", "alda", "bog")

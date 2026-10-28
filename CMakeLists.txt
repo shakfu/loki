@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
+# Keep in sync with include/loki/version.h (LOKI_VERSION) — that header is what --version prints.
 project(loki VERSION 0.5.1 LANGUAGES C)
 
 # C11: async_queue.c uses _Atomic, which is not available in C99.
@@ -92,7 +93,10 @@ if(LOKI_ENABLE_HTTP)
     list(APPEND LOKI_SOURCES src/http.c)
 endif()
 
+# Target name is libloki; OUTPUT_NAME is loki so the artifact is libloki.a / libloki.so
+# (CMake would otherwise emit liblibloki.* from the default "lib" + target name).
 add_library(libloki ${LOKI_LIBRARY_TYPE} ${LOKI_SOURCES})
+set_target_properties(libloki PROPERTIES OUTPUT_NAME loki)
 
 target_include_directories(libloki
     PUBLIC

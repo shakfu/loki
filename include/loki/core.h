@@ -153,9 +153,6 @@ struct editor_language_config {
 /* Register a new language for syntax highlighting */
 int editor_register_language(const struct editor_language_config *config);
 
-/* Select syntax highlighting for current file */
-void editor_select_syntax_highlight(editor_ctx_t *ctx, char *filename);
-
 /* ============================================================================
  * Selection
  * ============================================================================ */

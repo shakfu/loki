@@ -15,9 +15,9 @@ struct loki_lua_opts {
 #ifdef LOKI_ENABLE_HTTP
     int bind_http;             /* Non-zero to load HTTP bindings (loki.async_http) */
 #endif
-    int load_config;           /* Non-zero to load .psnd/init.lua and ~/.psnd/init.lua */
+    int load_config;           /* Non-zero to load .loki/init.lua / ~/.loki/init.lua */
     const char *config_override; /* Optional absolute path to init.lua */
-    const char *project_root;  /* Optional project root for .psnd/ discovery */
+    const char *project_root;  /* Optional project root for .loki/ discovery */
     const char *extra_lua_path;/* Optional extra package.path entries */
     loki_lua_report_fn reporter; /* Optional reporter for init errors */
     void *reporter_userdata;   /* Context passed to reporter */

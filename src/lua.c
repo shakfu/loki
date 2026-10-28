@@ -1488,7 +1488,7 @@ lua_State *loki_lua_bootstrap(editor_ctx_t *ctx, const struct loki_lua_opts *opt
     luaL_requiref(L, LUA_COLIBNAME, luaopen_coroutine, 1);
     lua_pop(L, 1);
 
-    /* Package library for require() - needed for .psnd modules */
+    /* Package library for require() - needed for .loki modules */
     luaL_requiref(L, LUA_LOADLIBNAME, luaopen_package, 1);
     lua_pop(L, 1);
 

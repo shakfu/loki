@@ -12,6 +12,4 @@
 
 ## Low
 
-- `editor_select_syntax_highlight()` is declared in `include/loki/core.h:157` but never defined.
-
 - Loopback HTTP proxies fail unless `LOKI_HTTP_ALLOW_INTERNAL` is set: the connect-time check sees the proxy address. Kept as the default (2026-10-25) because exempting the proxy needs curl to report which connection is the proxy. Revisit if someone needs a local proxy.

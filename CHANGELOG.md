@@ -46,6 +46,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Changed
 
+- **Version unified at 0.5.1**: `include/loki/version.h` is the single `LOKI_VERSION` source; `loki.h` includes it. CMake `project VERSION` stays aligned. Removed the unused `editor_select_syntax_highlight` declaration; `.psnd` comments in Lua opts / REPL helpers now say `.loki`.
+
+- **`docs/dev/architecture.md` and `coverage.md` rewritten** for the single-binary layout, module/host/session layering, and current CTest inventory (~530 `TEST()` cases; HTTP suites opt-in). `testing.md` aliases to `coverage.md`.
+
+- **README rewritten** for the current CLI (filename / `--help` / `--version` only; no `--repl` or AI CLI flags), C11/~20K-line size, linenoise, bundled `.loki/` examples, and trust/HTTP docs. Editor bootstrap sets `bind_http = 1` when HTTP is compiled in.
+
+- **Library artifact is `libloki.a`**: the CMake target stayed `libloki`, but `OUTPUT_NAME` is now `loki`, so the default `lib` prefix no longer produces `liblibloki.a`.
+
+- **`docs/dev/` refreshed**: dropped obsolete design transcripts and outdated coverage/roadmap drafts; rewrote architecture, testing, modal, REPL, HTTP, languages, and markdown notes to match the single `loki` binary and current APIs. Index: `docs/dev/README.md`. README links to modal/REPL docs updated.
+
 - **`loki.async_http()` returns `nil, message` on rejection**: it used to return a bare `nil` and drop the reason. A script can test a return value, but it cannot read the status bar. A URL, body or header containing a NUL byte is now rejected. C saw only the part before the NUL, so the request sent differed from the one the script passed, and a binary body was silently truncated. `loki_http_request()` takes an optional error buffer.
 
 - **`JSON_MAX_DEPTH` is public** (`src/json.h`) and lowered from 128 to 64, matching psnd.
