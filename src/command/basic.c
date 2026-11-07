@@ -8,6 +8,7 @@
 #include "../lang_bridge.h"
 #include "../trust.h"
 #include "loki.h"
+#include "term.h"
 
 /* :q, :quit - Quit editor */
 int cmd_quit(editor_ctx_t *ctx, const char *args) {
@@ -74,10 +75,11 @@ int cmd_set(editor_ctx_t *ctx, const char *args) {
     char option[64] = {0};
     char value[64] = {0};
 
-    if (sscanf(args, "%63s = %63s", option, value) == 2 ||
-        sscanf(args, "%63s=%63s", option, value) == 2) {
-        /* No option currently takes a value; report failure rather than
-         * claiming success for a setting that was never applied. */
+    if (sscanf(args, " %63[^= ] = %63s", option, value) == 2) {
+#ifdef LOKI_ENABLE_TERMINAL
+        if (strcmp(option, "termpos") == 0 || strcmp(option, "termsize") == 0)
+            return loki_term_set_option(ctx, option, value);
+#endif
         editor_set_status_msg(ctx, "Unknown option: %s", option);
         return 0;
     } else if (sscanf(args, "%63s", option) == 1) {

@@ -212,6 +212,7 @@ typedef struct EditorView {
     int screenrows;           /* Number of rows that we can show */
     int screencols;           /* Number of cols that we can show */
     int screenrows_total;     /* Rows available after status bars (before REPL) */
+    int screencols_total;     /* Terminal cols before the terminal pane; 0 = unset */
 
     /* Selection state */
     int sel_active;           /* Selection active flag */

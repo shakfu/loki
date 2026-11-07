@@ -48,6 +48,7 @@
 /* Lua headers for keymap dispatch */
 #include "lua.h"
 #include "lauxlib.h"
+#include "term.h"
 
 /* Control key definition (if not already defined) */
 #ifndef CTRL_R
@@ -891,8 +892,16 @@ static void process_visual_mode(editor_ctx_t *ctx, int fd, int c) {
  * For non-terminal input sources, use modal_process_event() directly.
  */
 int modal_process_keypress(editor_ctx_t *ctx, int fd) {
-    int c = terminal_read_key_idle(fd);
-    if (c == -1) return -1;  /* Input closed or failed. */
+    /* A focused terminal pane takes stdin bytes unparsed. */
+    int c;
+    if (loki_term_focused()) {
+        int r = loki_term_handle_input(fd, &c);
+        if (r < 0 || c < 0) return r;
+        /* c left the pane after Ctrl-\; handle it as an editor key. */
+    } else {
+        c = terminal_read_key_idle(fd);
+        if (c == -1) return -1;  /* Input closed or failed. */
+    }
 
     /* Idle work (a Lua callback calling loki.open) may have switched buffers
      * while we waited; the key belongs to the buffer now shown. */
@@ -900,6 +909,11 @@ int modal_process_keypress(editor_ctx_t *ctx, int fd) {
     if (shown) ctx = shown;
 
     if (choice_handle_key(c)) return 0;  /* answering a pending question */
+
+    if (c == TERM_FOCUS_KEY) {
+        loki_term_focus_or_open(ctx, NULL);
+        return 0;
+    }
 
     /* Handle pending Ctrl-X prefix - read second key immediately from terminal */
     if (ctx->view.pending_prefix == CTRL_X) {

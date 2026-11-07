@@ -323,6 +323,7 @@ void terminal_query_window_size(int *rows, int *cols) {
  * editor_update_repl_layout(). */
 void terminal_set_window_size(editor_ctx_t *ctx, int rows, int cols) {
     ctx->view.screencols = cols;
+    ctx->view.screencols_total = cols;
     rows -= STATUS_ROWS;
     if (rows < 1) rows = 1;
     ctx->view.screenrows_total = rows;

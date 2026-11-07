@@ -8,6 +8,7 @@ A modular text editor descended from antirez's [kilo](https://github.com/antirez
 - **Lua** — project or home config, `Ctrl-L` REPL, `register_language` / `register_command`
 - **Syntax** — builtin keyword DB plus Lua language packs; Tree-sitter via linenoise for REPL highlighting
 - **Editing basics** — multi-buffer tabs, undo/redo, search, indent, bracket match, OSC 52 clipboard
+- **Terminal pane** — `:term` or `Ctrl-\` runs `$SHELL` in a pane at the bottom or right (libghostty-vt; `-DLOKI_ENABLE_TERMINAL=OFF` to drop)
 - **Optional HTTP** — `loki.async_http()` when built with `-DLOKI_ENABLE_HTTP=ON` (libcurl; off by default)
 - **Trust model** — project `.loki/init.lua` runs only after `:trust` (see below)
 
@@ -54,7 +55,7 @@ A filename is required. There is no separate REPL binary and no `--complete` / `
 
 ### Keybindings
 
-**Global:** `Ctrl-S` save · `Ctrl-Q` quit · `Ctrl-F` find · `Ctrl-L` Lua REPL · `Ctrl-T` new buffer · `Ctrl-X` then `n`/`p`/`k` buffer next/prev/kill
+**Global:** `Ctrl-S` save · `Ctrl-Q` quit · `Ctrl-F` find · `Ctrl-L` Lua REPL · `Ctrl-\` terminal pane (see [Terminal pane](#terminal-pane-ctrl-)) · `Ctrl-T` new buffer · `Ctrl-X` then `n`/`p`/`k` buffer next/prev/kill
 
 Starts in **NORMAL** mode. `i` / `a` / `o` / `O` → INSERT; `ESC` → NORMAL; `v` → VISUAL (`y` yank, `d` yank+delete, `x` delete). `:` opens COMMAND mode.
 
@@ -95,6 +96,65 @@ Evaluate Lua at `>> `; builtins `help`, `history`, `clear`, `clear-history`, `ex
 ```
 
 Register help entries with `loki.repl.register(...)` — see [`docs/dev/repl_extension.md`](docs/dev/repl_extension.md).
+
+### Terminal pane (`Ctrl-\`)
+
+One pane per editor runs a shell on a pty, docked beside the buffer. Requires a build with `LOKI_ENABLE_TERMINAL` (default on; needs Zig 0.17).
+
+**Open and close**
+
+| Command | Effect |
+|-|-|
+| `Ctrl-\` | Open the pane with `$SHELL` (else `/bin/sh`) if closed, and focus it |
+| `:term` / `:terminal` | Open the pane with `$SHELL` |
+| `:term <cmd>` | Open the pane running `/bin/sh -c <cmd>` |
+| `:term!` | Close the pane and hang up the child |
+| `exit` in the shell | The pane closes when the child exits |
+
+**Switch between buffer and terminal**
+
+While the pane has focus, every key goes to the shell except `Ctrl-\`.
+
+| Keys | Effect |
+|-|-|
+| `Ctrl-\` (in the buffer) | Focus the pane |
+| `Ctrl-\` (in the pane) | Return focus to the buffer after 300 ms |
+| `Ctrl-\` then a key | Return focus and run that key in the editor, e.g. `Ctrl-\ :w` |
+| `Ctrl-\ Ctrl-\` | Send a literal `Ctrl-\` to the shell |
+
+The header shows `Ctrl-\ to leave` when focused and `Ctrl-\ to focus` when not. An unfocused pane keeps running and redraws its output.
+
+**Scrollback**
+
+The pane keeps about 10000 lines of history. History is compressed after 2 s without output; `loki.terminal_memory()` reports the pane's memory.
+
+- `Shift-PgUp` / `Shift-PgDn` page through history while focused. Typing jumps back to the bottom. Some host terminals (xterm) keep these keys; use scroll mode there.
+- `Ctrl-\ [` enters scroll mode. The header shows `SCROLL` and `[scroll -N]`, the lines above the bottom. Keys move the view and do not reach the shell.
+
+| Scroll-mode key | Moves |
+|-|-|
+| `k` / Up, `j` / Down | 1 line |
+| `b` / PgUp / `Ctrl-B`, `f` / PgDn / Space / `Ctrl-F` | 1 page |
+| `Ctrl-U`, `Ctrl-D` | half a page |
+| `g` / Home, `G` / End | top, bottom |
+| `[`, `]` | previous, next shell prompt (needs OSC 133 marks from the shell) |
+| `q`, Esc, Enter | exit to the bottom; the pane keeps focus |
+| `Ctrl-\` | exit and return focus to the buffer |
+
+The mouse wheel does not scroll the pane; loki has no mouse support yet. Full-screen programs (vim, less) use the alternate screen, which has no scrollback.
+
+**Layout**
+
+Default: a 12-row pane at the bottom. Changes apply to an open pane.
+
+```
+:set termpos=right      " bottom | right
+:set termsize=20        " rows (bottom) or cols (right); 0 = default
+```
+
+```lua
+loki.terminal_layout("right", 60)   -- returns position, size
+```
 
 ### Core Lua API
 

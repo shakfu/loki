@@ -86,6 +86,7 @@ Compatibility macros (`ctx_cx(ctx)`, …) still alias into model/view for older 
 | REPL UI | docked REPL in `lua.c`; helpers in `repl.c`, `repl_linenoise.c`, `repl_helpers.c` | Linenoise, not readline |
 | Markdown | `loki_markdown.c` | cmark wrapper |
 | HTTP | `http.c` | Only if `LOKI_ENABLE_HTTP`; limits in `http.h` |
+| Terminal pane | `term.c` | Only if `LOKI_ENABLE_TERMINAL`; pty child, libghostty-vt grid, raw input while focused |
 | Embed | `session.c`, `host.c`, `cli.c`, `jsonrpc.c`, `serialize.c`, `json.c`, `async_queue.c` | Shared / psnd-oriented |
 
 psnd stubs (audio/MIDI, live-loop, Joy/Alda/Csound headers) remain so shared sources compile; they are no-ops in core Loki.
@@ -123,6 +124,7 @@ Project `.loki/init.lua` loads only when `trust.c` says the cwd is trusted; othe
 | Option | Default | Effect |
 |--------|---------|--------|
 | `LOKI_ENABLE_HTTP` | OFF | Compile `http.c`, define `LOKI_ENABLE_HTTP`, link libcurl; editor sets `bind_http = 1` |
+| `LOKI_ENABLE_TERMINAL` | ON | Fetch libghostty-vt 1.0.0 (SHA256-pinned), build it with `zig` (0.17.x on PATH), link the static archive; compile `term.c` |
 | `LOKI_BUILD_SHARED` | OFF | Shared `libloki` |
 | `BUILD_TESTS` | ON | Unit test executables + CTest |
 
@@ -138,7 +140,7 @@ make test / make test-http   # Makefile wrappers
 
 ## Non-goals
 
-GUI, built-in terminal emulator, debugger, full LSP client, and a package manager are out of scope (`ROADMAP.md`). Tree-sitter is already in-tree for highlighting; unrelated parser features should be weighed against dependency cost.
+GUI, debugger, full LSP client, and a package manager are out of scope (`ROADMAP.md`). Tree-sitter is already in-tree for highlighting; unrelated parser features should be weighed against dependency cost.
 
 ## Related docs
 

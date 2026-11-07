@@ -34,6 +34,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Added
 
+- **Built-in terminal pane**: `:term [cmd]` or `Ctrl-\` runs `$SHELL` (or `cmd` under `/bin/sh -c`) on a pty. libghostty-vt 1.0.0 parses its output. The pane docks at the bottom (default) or right: `:set termpos=right`, `:set termsize=N`, or `loki.terminal_layout("right", 80)`. While focused, stdin goes to the child unparsed and `Ctrl-\` returns focus; `:term!` closes the pane. `Ctrl-\ [` enters scroll mode over 10,000 lines of history (`k`/`j`, `b`/`f`, Ctrl-U/D, `g`/`G`; `q` leaves); Shift-PgUp/PgDn also page when the host terminal passes them through; some, such as xterm, keep them for their own scrollback. `Ctrl-\ Ctrl-\` sends a literal Ctrl-\. Any other key after `Ctrl-\` (within 300 ms) returns focus and reaches the editor. libghostty-vt's default cap is 10,000 bytes, about one page of history, so loki caps by lines instead. Input is forwarded raw over decoding and re-encoding, because loki's key decoder drops sequences it does not know. Cursor keys are rewritten to SS3 under DECCKM, since the host terminal cannot see that mode. Building needs Zig 0.17 on PATH; `-DLOKI_ENABLE_TERMINAL=OFF` drops the dependency.
+
+- **Terminal pane: prompt jumps, idle compression, memory report**: in scroll mode, `[` and `]` jump to the previous and next shell prompt. They need OSC 133 prompt marks from the shell, and do nothing without them. History is compressed in steps after 2 s without output (`TERM_COMPRESS_IDLE_MS`), because libghostty-vt runs no timers of its own. `loki.terminal_memory()` returns the pane's resident and virtual bytes and its page counts. Bytes after `Ctrl-\ [` in the same read are now handled in scroll mode; before, they were dropped.
+
 - **Matching-bracket highlighting**: with the cursor on `(`, `)`, `[`, `]`, `{` or `}`, the bracket and its pair are shown bold and underlined. A match outside the visible rows shows as `match <line>` in the status bar. Brackets in strings and comments are skipped unless the cursor bracket is in one. The scan stops after 1000 rows in each direction (`BRACKET_MAX_SCAN_ROWS`). At that limit an unmatched bracket adds about 60-85 us per frame; an unbounded scan would grow with file size.
 
 - **`loki.json`**: `encode`, `decode`, `null` and `array`, built on `src/json.c` rather than a second JSON library. `encode` replaces invalid UTF-8 with U+FFFD, so its output is always valid JSON.
@@ -77,6 +81,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - **`.loki/modules/ai.lua`** (`ai.complete`, `ai.explain` and the `ai_complete`/`ai_explain` aliases): `:agent` replaces it. It sent one hardcoded OpenAI request and could never have worked in the editor, since `loki.async_http` callbacks did not fire. `loki.async_http` stays for other uses.
 
 ### Fixed
+
+- **`:set option=value` never parsed**: `%63s` consumed the whole `option=value` token, so the value was always missing. No option took a value until `termpos` and `termsize`.
 
 - **JSON parser drops data**: `\uXXXX` escapes became `?`, so non-ASCII text from any JSON peer was lost. Fractions and exponents were truncated to `int`, and larger integers saturated. Escapes now decode to UTF-8, with surrogate pairs joined and lone surrogates mapped to U+FFFD. Such numbers parse as `JSON_DOUBLE`. `json_object_get_int` still truncates them, so `jsonrpc.c` behaves as before. `json_key` now escapes keys.
 

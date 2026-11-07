@@ -101,6 +101,7 @@ int buffers_init(editor_ctx_t *initial_ctx) {
     first->ctx.view.screencols = initial_ctx->view.screencols;
     first->ctx.view.screenrows = initial_ctx->view.screenrows;
     first->ctx.view.screenrows_total = initial_ctx->view.screenrows_total;
+    first->ctx.view.screencols_total = initial_ctx->view.screencols_total;
     first->ctx.lua_host = initial_ctx->lua_host;  /* Share Lua host across buffers */
     memcpy(first->ctx.view.colors, initial_ctx->view.colors, sizeof(first->ctx.view.colors));
 
@@ -181,6 +182,7 @@ int buffer_create(const char *filename) {
         buf->ctx.view.screencols = template_ctx->view.screencols;
         buf->ctx.view.screenrows = template_ctx->view.screenrows;
         buf->ctx.view.screenrows_total = template_ctx->view.screenrows_total;
+        buf->ctx.view.screencols_total = template_ctx->view.screencols_total;
         buf->ctx.lua_host = template_ctx->lua_host;  /* Share Lua host */
         /* Copy color scheme */
         memcpy(buf->ctx.view.colors, template_ctx->view.colors, sizeof(buf->ctx.view.colors));

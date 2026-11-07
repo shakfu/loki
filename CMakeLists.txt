@@ -27,6 +27,7 @@ endif()
 option(LOKI_BUILD_SHARED "Build libloki as a shared library" OFF)
 option(BUILD_TESTS "Build unit tests" ON)
 option(LOKI_ENABLE_HTTP "Enable async HTTP support (requires libcurl)" OFF)
+option(LOKI_ENABLE_TERMINAL "Built-in terminal pane (libghostty-vt; needs zig 0.17 on PATH)" ON)
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
@@ -36,6 +37,18 @@ find_package(Threads REQUIRED)
 # Optional: libcurl for async HTTP
 if(LOKI_ENABLE_HTTP)
     find_package(CURL REQUIRED)
+endif()
+
+# libghostty-vt: built by `zig build` from the pinned release tarball.
+if(LOKI_ENABLE_TERMINAL)
+    include(FetchContent)
+    FetchContent_Declare(ghostty
+        URL https://release.files.ghostty.org/libghostty-vt/1.0.0/libghostty-vt-1.0.0.tar.gz
+        URL_HASH SHA256=4a6ef758be721923e1969e7b81b443dcc92d8dd3fb5a39600c03a8817a753676
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(ghostty)
 endif()
 
 # Find libuv for async support
@@ -99,6 +112,10 @@ if(LOKI_ENABLE_HTTP)
     list(APPEND LOKI_SOURCES src/http.c)
 endif()
 
+if(LOKI_ENABLE_TERMINAL)
+    list(APPEND LOKI_SOURCES src/term.c)
+endif()
+
 # Target name is libloki; OUTPUT_NAME is loki so the artifact is libloki.a / libloki.so
 # (CMake would otherwise emit liblibloki.* from the default "lib" + target name).
 add_library(libloki ${LOKI_LIBRARY_TYPE} ${LOKI_SOURCES})
@@ -152,6 +169,20 @@ if(LOKI_ENABLE_HTTP)
     target_compile_definitions(libloki PUBLIC LOKI_ENABLE_HTTP=1)
 endif()
 
+# Static archive: loki stays one binary with no dylib rpath.
+if(LOKI_ENABLE_TERMINAL)
+    target_link_libraries(libloki PUBLIC ghostty-vt-static)
+    target_compile_definitions(libloki PUBLIC LOKI_ENABLE_TERMINAL=1)
+    if(NOT APPLE)
+        # forkpty: libutil before glibc 2.34, libc after.
+        include(CheckLibraryExists)
+        check_library_exists(util forkpty "" LOKI_HAVE_LIBUTIL)
+        if(LOKI_HAVE_LIBUTIL)
+            target_link_libraries(libloki PUBLIC util)
+        endif()
+    endif()
+endif()
+
 if (NOT MSVC)
     target_link_libraries(libloki PUBLIC m)
 endif()
@@ -172,6 +203,12 @@ else()
     set(HTTP_STATUS "disabled - use -DLOKI_ENABLE_HTTP=ON to enable")
 endif()
 
+if(LOKI_ENABLE_TERMINAL)
+    set(TERMINAL_STATUS "enabled (libghostty-vt)")
+else()
+    set(TERMINAL_STATUS "disabled - use -DLOKI_ENABLE_TERMINAL=ON to enable")
+endif()
+
 add_custom_target(show-config
     COMMAND ${CMAKE_COMMAND} -E echo "Lua include: ${LUA_INCLUDE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E echo "Lua libraries: ${LUA_LIBRARIES}"
@@ -179,6 +216,7 @@ add_custom_target(show-config
     COMMAND ${CMAKE_COMMAND} -E echo "libuv libraries: ${LIBUV_LIBRARIES}"
     COMMAND ${CMAKE_COMMAND} -E echo "Line editing: linenoise with tree-sitter"
     COMMAND ${CMAKE_COMMAND} -E echo "Async HTTP: ${HTTP_STATUS}"
+    COMMAND ${CMAKE_COMMAND} -E echo "Terminal pane: ${TERMINAL_STATUS}"
 )
 
 # Tests
@@ -263,9 +301,26 @@ if(BUILD_TESTS)
             MOCK_AGENT="${CMAKE_CURRENT_SOURCE_DIR}/tests/acp_mock_agent.py")
         add_test(NAME test_acp COMMAND test_acp)
 
+        if(LOKI_ENABLE_TERMINAL)
+            add_test(NAME e2e_term_pane
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/term_pane.py
+                             $<TARGET_FILE:loki>)
+        endif()
         add_test(NAME e2e_mcp_shim
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/mcp_shim.py
                          $<TARGET_FILE:loki> ${CMAKE_CURRENT_SOURCE_DIR}/.loki/modules)
+    endif()
+
+    if(LOKI_ENABLE_TERMINAL)
+        add_executable(test_term tests/loki/test_term.c)
+        target_include_directories(test_term PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+            ${LUA_INCLUDE_DIR}
+        )
+        target_link_libraries(test_term PRIVATE libloki test_framework)
+        add_test(NAME test_term COMMAND test_term)
     endif()
 
     # HTTP tests (only if HTTP enabled)

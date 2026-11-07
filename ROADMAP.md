@@ -20,6 +20,8 @@ The codebase includes:
 
 - An optional libcurl-based asynchronous HTTP client.
 
+- A built-in terminal pane (`:term`, `Ctrl-\`) on libghostty-vt, docked at the bottom or right. On by default (`LOKI_ENABLE_TERMINAL`); needs Zig 0.17 to build.
+
 The repository has focused unit-test executables configured in CMake. The exact registered test set depends on build options; this roadmap does not assert a pass rate.
 
 ### Known gaps in existing features
@@ -90,6 +92,13 @@ The following items are proposals and are not represented as completed features.
 
 ### Longer term
 
+#### Terminal pane follow-ups
+
+- Kitty keyboard protocol and mouse forwarding (wheel scrollback); input is forwarded raw today.
+- Screen-snapshot tests: replay loki's frame into libghostty-vt and assert on the grid (`test_term.c` does this for the pane).
+- ANSI cleanup for `loki.spawn` output.
+- Paste safety checks.
+
 #### Lua plugin conventions
 
 - Define a plugin directory and deterministic loading rules.
@@ -112,7 +121,7 @@ The following items are proposals and are not represented as completed features.
 
 ## Non-goals
 
-The project intends to remain terminal-native and focused on editing. A GUI, built-in terminal, debugger, full project-management environment, and LSP client are outside the current scope. Tree-Sitter is already part of the current build for syntax highlighting, so it is not a non-goal; adding unrelated parser features should still be weighed against dependency and maintenance cost. A package manager is not currently planned; Lua modules should remain easy to load directly.
+The project intends to remain terminal-native and focused on editing. A GUI, debugger, full project-management environment, and LSP client are outside the current scope. Tree-Sitter is already part of the current build for syntax highlighting, so it is not a non-goal; adding unrelated parser features should still be weighed against dependency and maintenance cost. A package manager is not currently planned; Lua modules should remain easy to load directly.
 
 ## Development Principles
 

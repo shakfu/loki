@@ -22,6 +22,7 @@
 #include "internal.h"
 #include "buffers.h"
 #include "command/command_impl.h"
+#include "term.h"
 #include <lua.h>
 
 /* Command history storage */
@@ -54,6 +55,11 @@ static command_def_t builtin_commands[] = {
     {"h",      cmd_help,        "Show help",                      0, 1},
     {"set",    cmd_set,         "Set option (wrap, etc)",         0, 2},
     {"trust",  cmd_trust,       "Trust this project's Lua config", 0, 0},
+#ifdef LOKI_ENABLE_TERMINAL
+    {"term",     cmd_term,       "Open or focus the terminal pane", 0, -1},
+    {"terminal", cmd_term,       "Open or focus the terminal pane", 0, -1},
+    {"term!",    cmd_term_close, "Close the terminal pane",         0, 0},
+#endif
 
     /* Navigation (goto.c) */
     {"goto",   cmd_goto,        "Go to line number",              1, 1},

@@ -34,6 +34,7 @@
 #include "spawn.h"
 #include "listen.h"
 #include "mcp_shim.h"
+#include "term.h"
 #include <uv.h>
 #include "shared/context.h"
 
@@ -64,6 +65,13 @@ static void loki_lua_status_reporter(const char *message, void *userdata) {
 void editor_update_repl_layout(editor_ctx_t *ctx) {
     if (!ctx) return;
     int reserved = (ctx_repl(ctx) && ctx_repl(ctx)->active) ? LUA_REPL_TOTAL_ROWS : 0;
+    int term_rows, term_cols;
+    loki_term_reserved(ctx, &term_rows, &term_cols);
+    reserved += term_rows;
+    if (ctx->view.screencols_total > 0) {
+        ctx->view.screencols = ctx->view.screencols_total - term_cols;
+        if (ctx->view.screencols < 1) ctx->view.screencols = 1;
+    }
     int available = ctx->view.screenrows_total;
     if (available > reserved) {
         ctx->view.screenrows = available - reserved;
@@ -295,6 +303,7 @@ static int editor_run_background(editor_ctx_t *ctx) {
     uv_run(uv_default_loop(), UV_RUN_NOWAIT);
     if (loki_spawn_take_activity()) ran = 1;
     if (loki_listen_take_activity()) ran = 1;
+    if (loki_term_pump()) ran = 1;
 
     /* Dispatch all pending async events (timer, custom, user-defined) */
     if (async_queue_dispatch_all(NULL, ctx) > 0) ran = 1;
@@ -492,6 +501,7 @@ int loki_editor_main(int argc, char **argv) {
     terminal_host_init(g_terminal_host, STDIN_FILENO);
     terminal_host_enable_raw_mode(g_terminal_host);
     terminal_set_idle_hook(editor_idle);
+    loki_term_set_idle_hook(editor_idle);
     editor_set_status_msg(buffer_get_current(),
         "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find | Ctrl-T = new buf | Ctrl-X n/p/k = buf nav");
 
@@ -540,6 +550,7 @@ void editor_cleanup_resources(editor_ctx_t *ctx) {
     /* Before the queue cleanup runs the libuv loop and before Lua closes. */
     loki_spawn_shutdown();
     loki_listen_shutdown();
+    loki_term_close();
 
     /* Clean up async event queue */
     async_queue_cleanup();

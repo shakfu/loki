@@ -42,6 +42,7 @@ see LICENSE.
 #include "syntax.h"
 #include "indent.h"
 #include "bracket.h"
+#include "term.h"
 #include "choice.h"
 #include "lang_bridge.h"
 
@@ -1079,9 +1080,21 @@ void editor_refresh_screen(editor_ctx_t *ctx) {
         if (cursor_col > ctx->view.screencols) cursor_col = ctx->view.screencols;
     }
 
+    /* The pane draws last, over the cleared tail of each shortened row. */
+    int show_cursor = 1;
+    if (loki_term_is_open()) {
+        int trow, tcol;
+        if (loki_term_render(ctx, &ab, &trow, &tcol)) {
+            cursor_row = trow;
+            cursor_col = tcol;
+        } else if (loki_term_focused()) {
+            show_cursor = 0;    /* the child hid its cursor */
+        }
+    }
+
     snprintf(buf,sizeof(buf),"\x1b[%d;%dH",cursor_row,cursor_col);
     terminal_buffer_append(&ab,buf,strlen(buf));
-    terminal_buffer_append(&ab,"\x1b[?25h",6); /* Show cursor. */
+    if (show_cursor) terminal_buffer_append(&ab,"\x1b[?25h",6); /* Show cursor. */
     write_ignore_result(STDOUT_FILENO,ab.b,ab.len);
     terminal_buffer_free(&ab);
 }

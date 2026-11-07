@@ -45,6 +45,7 @@
 #endif
 #include "shared/context.h"  /* SharedContext for launch_quantize */
 #include "shared/midi/midi.h"  /* MIDI port functions */
+#include "term.h"
 
 /* ======================= Lua API bindings ================================ */
 
@@ -295,6 +296,35 @@ static int lua_loki_line_numbers(lua_State *L) {
 
     return 0;
 }
+
+#ifdef LOKI_ENABLE_TERMINAL
+/* Lua API: loki.terminal_layout(["bottom"|"right"[, size]]) - pane placement.
+ * Returns position and size; raises on a bad position or size. */
+static int lua_loki_terminal_layout(lua_State *L) {
+    if (lua_gettop(L) > 0) {
+        const char *pos = luaL_checkstring(L, 1);
+        lua_Integer size = luaL_optinteger(L, 2, 0);
+        if (size < 0 || size > 1000 || loki_term_set_layout(pos, (int)size) < 0)
+            return luaL_error(L, "terminal_layout: position bottom|right, size 0-1000");
+    }
+    lua_pushstring(L, loki_term_position() == TERM_POS_RIGHT ? "right" : "bottom");
+    lua_pushinteger(L, loki_term_size());
+    return 2;
+}
+
+/* Lua API: loki.terminal_memory() - pane memory table, or nil when closed. */
+static int lua_loki_terminal_memory(lua_State *L) {
+    TermMemory m;
+    if (loki_term_memory(&m) < 0) { lua_pushnil(L); return 1; }
+    lua_createtable(L, 0, 5);
+    lua_pushinteger(L, (lua_Integer)m.resident_bytes); lua_setfield(L, -2, "resident_bytes");
+    lua_pushinteger(L, (lua_Integer)m.virtual_bytes); lua_setfield(L, -2, "virtual_bytes");
+    lua_pushinteger(L, (lua_Integer)m.pages); lua_setfield(L, -2, "pages");
+    lua_pushinteger(L, (lua_Integer)m.compressed_pages); lua_setfield(L, -2, "compressed_pages");
+    lua_pushboolean(L, m.compression_supported); lua_setfield(L, -2, "compression_supported");
+    return 1;
+}
+#endif
 
 /* =========================== Modal System Lua API =========================== */
 
@@ -1106,6 +1136,12 @@ void loki_lua_bind_editor(lua_State *L) {
     /* Display settings */
     lua_pushcfunction(L, lua_loki_line_numbers);
     lua_setfield(L, -2, "line_numbers");
+#ifdef LOKI_ENABLE_TERMINAL
+    lua_pushcfunction(L, lua_loki_terminal_layout);
+    lua_setfield(L, -2, "terminal_layout");
+    lua_pushcfunction(L, lua_loki_terminal_memory);
+    lua_setfield(L, -2, "terminal_memory");
+#endif
 
     /* Modal system functions */
     lua_pushcfunction(L, lua_loki_get_mode);
