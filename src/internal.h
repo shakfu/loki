@@ -365,6 +365,10 @@ void editor_update_repl_layout(editor_ctx_t *ctx);
 void editor_update_repl_layout_all(editor_ctx_t *ctx);
 /* Apply a terminal size (full rows and cols) to every buffer. */
 void editor_resize_buffers(int rows, int cols);
+/* Frontend hooks (editor.c): shared startup, then per-iteration background
+ * work. The terminal loop and the CUI frontend both use them. */
+int loki_editor_setup(int argc, char **argv);
+int editor_run_background(editor_ctx_t *ctx);
 
 /* Editor cleanup */
 void editor_cleanup_resources(editor_ctx_t *ctx);

@@ -718,8 +718,8 @@ static void editor_refresh_screen_via_renderer(editor_ctx_t *ctx) {
     r->render_status(r, &status_info, ctx->view.screencols);
 
     /* Render message line */
-    const char *msg = NULL;
-    if (ctx->view.statusmsg[0] && time(NULL) - ctx->view.statusmsg_time < 5) {
+    const char *msg = choice_prompt();  /* a question stays until answered */
+    if (!msg && ctx->view.statusmsg[0] && time(NULL) - ctx->view.statusmsg_time < 5) {
         msg = ctx->view.statusmsg;
     }
     r->render_message(r, msg, ctx->view.screencols);

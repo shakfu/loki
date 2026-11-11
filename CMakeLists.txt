@@ -164,6 +164,18 @@ add_executable(loki src/main.c)
 target_compile_options(loki PRIVATE -Wall -Wextra -pedantic)
 target_link_libraries(loki PRIVATE libloki)
 
+# Native-window frontend drawn with CUI (thirdparty/cui, locally patched; see
+# its PATCHES.md). Separate binary so the terminal build has no GUI deps.
+option(LOKI_ENABLE_CUI "Build loki-cui, a native-window frontend using CUI" OFF)
+if(LOKI_ENABLE_CUI)
+    set(CUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(CUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(thirdparty/cui EXCLUDE_FROM_ALL)
+    add_executable(loki-cui src/cui_main.c src/cui_frontend.c)
+    target_compile_options(loki-cui PRIVATE -Wall -Wextra)
+    target_link_libraries(loki-cui PRIVATE libloki cui::cui)
+endif()
+
 message(STATUS "loki will use linenoise for line editing (with tree-sitter syntax highlighting)")
 
 if(LOKI_ENABLE_HTTP)
@@ -311,3 +323,16 @@ endif()
 # Install
 install(TARGETS loki RUNTIME DESTINATION bin)
 install(DIRECTORY .loki DESTINATION share/loki)
+
+# loki-cui frame loop, headless (software renderer, injected input).
+if(LOKI_ENABLE_CUI AND BUILD_TESTS)
+    add_executable(test_cui_frontend tests/loki/test_cui_frontend.c src/cui_frontend.c)
+    target_include_directories(test_cui_frontend PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${LUA_INCLUDE_DIR}
+    )
+    target_link_libraries(test_cui_frontend PRIVATE libloki test_framework cui::cui)
+    add_test(NAME test_cui_frontend COMMAND test_cui_frontend)
+endif()

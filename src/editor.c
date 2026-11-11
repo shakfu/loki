@@ -276,7 +276,7 @@ void lua_apply_highlight_row(editor_ctx_t *ctx, t_erow *row, int default_ran) {
 
 /* Run work that does not come from a key: resize, async events, HTTP
  * completions. Returns nonzero if any ran, so the screen may be stale. */
-static int editor_run_background(editor_ctx_t *ctx) {
+int editor_run_background(editor_ctx_t *ctx) {
     int ran = 0;
 
     /* Every buffer keeps its own copy of the screen size. */
@@ -333,17 +333,12 @@ static void print_usage(void) {
     printf("  Ctrl-L    Lua console\n");
 }
 
-int loki_editor_main(int argc, char **argv) {
+int loki_editor_setup(int argc, char **argv) {
     /* Static editor context - ensures all fields are zero-initialized.
      * This is critical because init_editor() doesn't initialize all fields
      * (undo_state, indent_config, language states) and Lua bootstrap
      * may access these fields before buffers_init() runs. */
     static editor_ctx_t E;
-
-    /* The shim relays stdio and is not an editor: no terminal, no atexit
-     * teardown, nothing written to stdout but MCP messages. */
-    if (argc >= 2 && strcmp(argv[1], "--mcp-shim") == 0)
-        return loki_mcp_shim(argc >= 3 ? argv[2] : NULL);
 
     /* Initialize language bridge system */
     loki_lang_init();
@@ -488,12 +483,23 @@ int loki_editor_main(int argc, char **argv) {
         }
     }
 
+    editor_set_status_msg(buffer_get_current(),
+        "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find | Ctrl-T = new buf | Ctrl-X n/p/k = buf nav");
+    return 0;
+}
+
+int loki_editor_main(int argc, char **argv) {
+    /* The shim relays stdio and is not an editor: no terminal, no atexit
+     * teardown, nothing written to stdout but MCP messages. */
+    if (argc >= 2 && strcmp(argv[1], "--mcp-shim") == 0)
+        return loki_mcp_shim(argc >= 3 ? argv[2] : NULL);
+
+    loki_editor_setup(argc, argv);
+
     /* Initialize terminal host and enable raw mode */
     terminal_host_init(g_terminal_host, STDIN_FILENO);
     terminal_host_enable_raw_mode(g_terminal_host);
     terminal_set_idle_hook(editor_idle);
-    editor_set_status_msg(buffer_get_current(),
-        "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find | Ctrl-T = new buf | Ctrl-X n/p/k = buf nav");
 
     while(1) {
         /* Get current buffer context */

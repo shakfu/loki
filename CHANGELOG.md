@@ -34,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Added
 
+- **`loki-cui`, a native-window frontend** (experimental, `cui` branch): built with `-DLOKI_ENABLE_CUI=ON`. It draws loki's existing `Renderer` output as a monospace cell grid with [CUI](https://github.com/yappologistic/CUI), vendored in `thirdparty/cui` with three small patches (`thirdparty/cui/PATCHES.md`). The editor core, Lua and modal handling are unchanged. A cell grid keeps loki's behaviour; CUI's own `cui_editor` component would have replaced it. Interactive search (`/`, Ctrl-F) does not work yet: it reads keys from a terminal fd in its own loop. Details: [`docs/dev/cui-frontend.md`](docs/dev/cui-frontend.md).
+
 - **Matching-bracket highlighting**: with the cursor on `(`, `)`, `[`, `]`, `{` or `}`, the bracket and its pair are shown bold and underlined. A match outside the visible rows shows as `match <line>` in the status bar. Brackets in strings and comments are skipped unless the cursor bracket is in one. The scan stops after 1000 rows in each direction (`BRACKET_MAX_SCAN_ROWS`). At that limit an unmatched bracket adds about 60-85 us per frame; an unbounded scan would grow with file size.
 
 - **`loki.json`**: `encode`, `decode`, `null` and `array`, built on `src/json.c` rather than a second JSON library. `encode` replaces invalid UTF-8 with U+FFFD, so its output is always valid JSON.
