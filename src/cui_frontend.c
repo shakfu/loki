@@ -4,9 +4,6 @@
  * character cells, a CUI canvas paints the cells in a monospace font, and CUI
  * key events become loki keycodes fed to modal_process_event(). Per frame:
  * resize -> background work -> input -> refresh -> paint.
- *
- * Not supported here: interactive search ('/', Ctrl-F), which reads keys
- * from a terminal fd in its own loop (search.c).
  */
 #include <stdbool.h>
 #include <stdio.h>
@@ -301,13 +298,6 @@ static void feed_key(int c) {
     editor_ctx_t *ctx = buffer_get_current();
     if (!ctx) return;
     if (choice_handle_key(c)) return;
-    if (c == CTRL_F) {
-        t_lua_repl *repl = ctx_repl(ctx);
-        if (!repl || !repl->active) {
-            editor_set_status_msg(ctx, "Search is not available in loki-cui yet");
-            return;
-        }
-    }
     EditorEvent ev = event_from_keycode(c);
     modal_process_event(ctx, &ev);
 }

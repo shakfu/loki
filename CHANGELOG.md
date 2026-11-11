@@ -34,7 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Added
 
-- **`loki-cui`, a native-window frontend** (experimental, `cui` branch): built with `-DLOKI_ENABLE_CUI=ON`. It draws loki's existing `Renderer` output as a monospace cell grid with [CUI](https://github.com/yappologistic/CUI), vendored in `thirdparty/cui` with three small patches (`thirdparty/cui/PATCHES.md`). The editor core, Lua and modal handling are unchanged. A cell grid keeps loki's behaviour; CUI's own `cui_editor` component would have replaced it. Interactive search (`/`, Ctrl-F) does not work yet: it reads keys from a terminal fd in its own loop. Details: [`docs/dev/cui-frontend.md`](docs/dev/cui-frontend.md).
+- **`loki-cui`, a native-window frontend** (experimental, `cui` branch): built with `-DLOKI_ENABLE_CUI=ON`. It draws loki's existing `Renderer` output as a monospace cell grid with [CUI](https://github.com/yappologistic/CUI), vendored in `thirdparty/cui` with three small patches (`thirdparty/cui/PATCHES.md`). The editor core, Lua and modal handling are unchanged. A cell grid keeps loki's behaviour; CUI's own `cui_editor` component would have replaced it. Details: [`docs/dev/cui-frontend.md`](docs/dev/cui-frontend.md).
 
 - **Matching-bracket highlighting**: with the cursor on `(`, `)`, `[`, `]`, `{` or `}`, the bracket and its pair are shown bold and underlined. A match outside the visible rows shows as `match <line>` in the status bar. Brackets in strings and comments are skipped unless the cursor bracket is in one. The scan stops after 1000 rows in each direction (`BRACKET_MAX_SCAN_ROWS`). At that limit an unmatched bracket adds about 60-85 us per frame; an unbounded scan would grow with file size.
 
@@ -57,6 +57,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - **`is_selected_view()`** (`src/selection.h`): selection test against an explicit view, used by psnd's split panes.
 
 ### Changed
+
+- **`/`, `n` and `N` in NORMAL mode**: `/` opens the same incremental search as `Ctrl-F`. `n` / `N` jump to the next / previous match of the last query accepted with Enter, wrapping at the file ends; the status line shows `/query` or `?query`, with `(wrapped)` when it wrapped. The last query is shared by all buffers.
+
+- **Search starts at the cursor and lands on the right column after tabs**: incremental search (`/`, `Ctrl-F`) used to take the first match in the file, and it set the cursor column from the rendered row, so on a line with tabs the cursor landed up to 7 columns right of the match. It now finds the first match after the cursor, wrapping at the ends, like vim. Arrows step match by match rather than row by row. A query with no match returns the cursor to where the search began. The view scrolls only when the match is off screen. Matching runs on the row's text, shared with `n`/`N`; only the highlight converts to render columns.
+
+- **Ctrl-F search is event-driven**: search state lives on the view, and `modal_process_event()` sends keys to it while active. Search used to run its own loop reading a terminal fd, so it did nothing in loki-cui or the session/JSON-RPC path, and background work stalled until it ended. Background Lua can now edit rows mid-search, so the match highlight is restored from a copy, clipped to the row's current length.
 
 - **Version unified at 0.5.1**: `include/loki/version.h` is the single `LOKI_VERSION` source; `loki.h` includes it. CMake `project VERSION` stays aligned. Removed the unused `editor_select_syntax_highlight` declaration; `.psnd` comments in Lua opts / REPL helpers now say `.loki`.
 

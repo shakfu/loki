@@ -182,6 +182,56 @@ TEST(cui_yank_reaches_clipboard) {
     teardown();
 }
 
+/* Ctrl-F search runs inside the frame loop: the prompt shows while typing,
+ * and ENTER leaves the cursor on the match. */
+TEST(cui_search_finds_match) {
+    setup();
+    frame();
+    cui_input_text(ui, "ialpha");
+    press(CUI_KEY_ENTER, 0);
+    cui_input_text(ui, "beta");
+    press(CUI_KEY_ESCAPE, 0);
+    frame();
+    press(CUI_KEY_F, CUI_MOD_CTRL);
+    cui_input_text(ui, "bet");
+    frame();
+    int rows = 0, cols = 0;
+    loki_cui_grid_size(&rows, &cols);
+    ASSERT_STR_EQ(grid_row(rows - 1), "Search: bet (Use ESC/Arrows/Enter)");
+    int r = -1, c = -1;
+    loki_cui_cursor(&r, &c);
+    ASSERT_EQ(r, 1);                       /* visible match: no scroll */
+    ASSERT_STR_EQ(grid_row(1), "beta");
+    press(CUI_KEY_ENTER, 0);
+    frame();
+    editor_ctx_t *ctx = buffer_get_current();
+    ASSERT_EQ(ctx->view.rowoff + ctx->view.cy, 1);
+    ASSERT_EQ(ctx->model.numrows, 2);   /* ENTER ended search, not a newline */
+    teardown();
+}
+
+/* / and n come through the same modal path as in the terminal. */
+TEST(cui_slash_and_n_search) {
+    setup();
+    frame();
+    cui_input_text(ui, "ibeta");
+    press(CUI_KEY_ENTER, 0);
+    cui_input_text(ui, "x beta");
+    press(CUI_KEY_ESCAPE, 0);
+    frame();
+    cui_input_text(ui, "/beta");
+    press(CUI_KEY_ENTER, 0);
+    cui_input_text(ui, "n");
+    frame();
+    editor_ctx_t *ctx = buffer_get_current();
+    /* "/" from the end of line 2 wraps to line 1; n moves to line 2. */
+    ASSERT_EQ(ctx->view.rowoff + ctx->view.cy, 1);
+    ASSERT_EQ(ctx->view.coloff + ctx->view.cx, 2);
+    ASSERT_STR_EQ(ctx->view.statusmsg, "/beta");
+    ASSERT_EQ(ctx->model.numrows, 2);
+    teardown();
+}
+
 BEGIN_TEST_SUITE("CUI frontend")
     RUN_TEST(cui_grid_sizes_buffers);
     RUN_TEST(cui_input_keeps_order_within_frame);
@@ -191,4 +241,6 @@ BEGIN_TEST_SUITE("CUI frontend")
     RUN_TEST(cui_paste_refused_in_normal_mode);
     RUN_TEST(cui_paste_inserts_in_insert_mode);
     RUN_TEST(cui_yank_reaches_clipboard);
+    RUN_TEST(cui_search_finds_match);
+    RUN_TEST(cui_slash_and_n_search);
 END_TEST_SUITE()

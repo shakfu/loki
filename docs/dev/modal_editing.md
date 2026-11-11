@@ -8,7 +8,7 @@ Loki starts in **NORMAL** mode. Press `i` (or `a` / `o` / `O` / …) for INSERT;
 
 | Mode | Role |
 |------|------|
-| NORMAL | Navigation and commands (`h/j/k/l`, `x`, `{`/`}`, …) |
+| NORMAL | Navigation and commands (`h/j/k/l`, `x`, `{`/`}`, `/`, `n`/`N`, …) |
 | INSERT | Insert text; `ESC` → NORMAL |
 | VISUAL | Extend selection; `y` yank, `d` yank+delete, `x` delete |
 | COMMAND | Ex-style line (`:w`, `:q`, `:trust`, …) |

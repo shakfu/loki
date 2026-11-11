@@ -34,10 +34,10 @@ Syntax colors come from the buffer's `view.colors` (the Lua theme). The CUI them
 - Paste works only in INSERT, COMMAND or the REPL. In NORMAL mode the clipboard would run as commands.
 - Visual-mode yank writes to the system clipboard.
 - Left click moves the cursor.
+- Ctrl-F searches, as in the terminal build.
 
 ## Known gaps
 
-- `/` and Ctrl-F search: `editor_find()` (`search.c`) blocks on `terminal_read_key(fd)`. Fixing it means turning search into an event-driven mode.
 - Non-ASCII text: one cell per code point. Wide (CJK) and combining characters misalign.
 - Bold uses a 0.6 pt overdraw, because CUI embeds no bold mono face.
 - Bracket-match highlighting and the `match <line>` status hint exist only on the VT100 path, not the `Renderer` path.

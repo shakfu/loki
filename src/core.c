@@ -105,6 +105,7 @@ void editor_ctx_free(editor_ctx_t *ctx) {
         free(ctx->model.row[i].hl);
     }
     free(ctx->model.row);
+    search_free(ctx);
 
     /* Free filename */
     free(ctx->model.filename);
@@ -719,6 +720,7 @@ static void editor_refresh_screen_via_renderer(editor_ctx_t *ctx) {
 
     /* Render message line */
     const char *msg = choice_prompt();  /* a question stays until answered */
+    if (!msg) msg = search_prompt(ctx);
     if (!msg && ctx->view.statusmsg[0] && time(NULL) - ctx->view.statusmsg_time < 5) {
         msg = ctx->view.statusmsg;
     }
@@ -1024,6 +1026,7 @@ void editor_refresh_screen(editor_ctx_t *ctx) {
     /* Second row depends on ctx->view.statusmsg and the status message update time. */
     terminal_buffer_append(&ab,"\x1b[0K",4);
     const char *pending = choice_prompt();  /* a question stays until answered */
+    if (!pending) pending = search_prompt(ctx);
     int msglen = (int)strlen(pending ? pending : ctx->view.statusmsg);
     if (pending)
         terminal_buffer_append(&ab,pending,msglen <= ctx->view.screencols ? msglen : ctx->view.screencols);
