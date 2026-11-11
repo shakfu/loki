@@ -86,6 +86,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Fixed
 
+- **Visual `d` deleted nothing**: it yanks before deleting, and a successful copy clears the selection, so `delete_selection()` found none. In a terminal the OSC 52 copy always succeeds, so `d` never deleted. The selection is now kept across the yank; visual `x` was unaffected.
+
 - **JSON parser drops data**: `\uXXXX` escapes became `?`, so non-ASCII text from any JSON peer was lost. Fractions and exponents were truncated to `int`, and larger integers saturated. Escapes now decode to UTF-8, with surrogate pairs joined and lone surrogates mapped to U+FFFD. Such numbers parse as `JSON_DOUBLE`. `json_object_get_int` still truncates them, so `jsonrpc.c` behaves as before. `json_key` now escapes keys.
 
 - **Background work runs without a keypress**: the key read retried each 100 ms timeout internally, so async events, resizes and redraws waited for the next key. Nothing in the editor called `loki_http_poll`, so `loki.async_http` callbacks never fired. Idle timeouts in the top-level key read now run that work and redraw if any ran. Nested prompts such as search skip it, because search keeps pointers into row highlight data that a callback could free.
