@@ -56,6 +56,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Changed
 
+- **`/`, `n` and `N` in NORMAL mode**: `/` opens the same incremental search as `Ctrl-F`. `n` / `N` jump to the next / previous match of the last query accepted with Enter, wrapping at the file ends; the status line shows `/query` or `?query`, with `(wrapped)` when it wrapped. The last query is shared by all buffers.
+
+- **Search starts at the cursor and lands on the right column after tabs**: incremental search (`/`, `Ctrl-F`) used to take the first match in the file, and it set the cursor column from the rendered row, so on a line with tabs the cursor landed up to 7 columns right of the match. It now finds the first match after the cursor, wrapping at the ends, like vim. Arrows step match by match rather than row by row. A query with no match returns the cursor to where the search began. The view scrolls only when the match is off screen. Matching runs on the row's text, shared with `n`/`N`; only the highlight converts to render columns.
+
+- **Ctrl-F search is event-driven**: search state lives on the view, and `modal_process_event()` sends keys to it while active. Search used to run its own loop reading a terminal fd, so it did nothing in the session/JSON-RPC path, and background work stalled until it ended. Background Lua can now edit rows mid-search, so the match highlight is restored from a copy, clipped to the row's current length.
+
 - **Version unified at 0.5.1**: `include/loki/version.h` is the single `LOKI_VERSION` source; `loki.h` includes it. CMake `project VERSION` stays aligned. Removed the unused `editor_select_syntax_highlight` declaration; `.psnd` comments in Lua opts / REPL helpers now say `.loki`.
 
 - **`docs/dev/architecture.md` and `coverage.md` rewritten** for the single-binary layout, module/host/session layering, and current CTest inventory (~530 `TEST()` cases; HTTP suites opt-in). `testing.md` aliases to `coverage.md`.

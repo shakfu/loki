@@ -249,6 +249,9 @@ if(BUILD_TESTS)
         add_test(NAME e2e_idle_spawn
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/idle_spawn.py
                          $<TARGET_FILE:loki>)
+        add_test(NAME e2e_search
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/search.py
+                         $<TARGET_FILE:loki>)
         add_executable(test_acp tests/loki/test_acp.c)
         target_include_directories(test_acp PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include

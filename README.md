@@ -56,7 +56,7 @@ A filename is required. There is no separate REPL binary and no `--complete` / `
 
 **Global:** `Ctrl-S` save · `Ctrl-Q` quit · `Ctrl-F` find · `Ctrl-L` Lua REPL · `Ctrl-T` new buffer · `Ctrl-X` then `n`/`p`/`k` buffer next/prev/kill
 
-Starts in **NORMAL** mode. `i` / `a` / `o` / `O` → INSERT; `ESC` → NORMAL; `v` → VISUAL (`y` yank, `d` yank+delete, `x` delete). `:` opens COMMAND mode.
+Starts in **NORMAL** mode. `i` / `a` / `o` / `O` → INSERT; `ESC` → NORMAL; `v` → VISUAL (`y` yank, `d` yank+delete, `x` delete). `:` opens COMMAND mode. `/` searches like `Ctrl-F`; `n` / `N` jump to the next / previous match of the last search.
 
 Traditional always-insert start (in a trusted `.loki/init.lua` or `~/.loki/init.lua`):
 
