@@ -5,6 +5,9 @@
  * the way string.sub does.
  */
 
+/* glibc declares realpath only with _DEFAULT_SOURCE or XSI, not under the
+ * strict _POSIX_C_SOURCE set in CMake. */
+#define _DEFAULT_SOURCE
 #include <lua.h>
 #include <lauxlib.h>
 #include <limits.h>
